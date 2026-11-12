@@ -21,6 +21,8 @@ dir="$HOME/.agents/orchestrator"
 repo=$(git remote get-url origin | sed -E 's#(\.git)?/?$##; s#^.*[:/]([^/]+/[^/]+)$#\1#')
 plan="$dir/${repo//\//-}.json"
 me=${SUPERSET_TERMINAL_ID:-unknown}
+# superset, paradev and pdev are the same Paradev CLI; use whichever is installed.
+cli=$(command -v superset || command -v paradev || command -v pdev || true)
 now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 lock() {
@@ -43,8 +45,9 @@ put() {
 
 owner_alive() {
   local terminal=$1
+  [[ -n "$cli" ]] || { echo "Paradev CLI not found: install superset, paradev or pdev" >&2; exit 1; }
   [[ "$terminal" != "unknown" ]] &&
-    superset snapshot --json | jq -e --arg t "$terminal" \
+    "$cli" snapshot --json | jq -e --arg t "$terminal" \
       '[.workspaces[].terminals[] | select(.id == $t and .agent != null)] | length > 0' >/dev/null
 }
 
