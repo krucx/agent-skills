@@ -20,6 +20,23 @@ Hermes once it's added to `skills.external_dirs`), and links `~/.claude/skills/`
 Claude Code. The clone is the single source of truth: edit it, and every harness sees the
 change. A `git pull` updates them all.
 
+### Windows
+
+```powershell
+git clone git@github.com:krucx/agent-skills.git
+cd agent-skills
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+`install.ps1` runs in Windows PowerShell 5.1 or PowerShell 7 (`pwsh`). It copies each skill
+into `%USERPROFILE%\.agents\skills\` and `%USERPROFILE%\.claude\skills\` instead of
+symlinking, so **run it again after every `git pull`** to update the copies. Its own earlier
+copies are replaced; any other folder already at a target is moved to
+`%USERPROFILE%\.agents\skill-backups\`, never overwritten.
+
+The orchestrator skill's scripts are bash. On Windows, run your harness from Git Bash or WSL,
+with `jq`, `gh` and `superset` (or `paradev`) on `PATH` there.
+
 ## Using the orchestrator
 
 | Harness | Invoke |
