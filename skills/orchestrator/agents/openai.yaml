@@ -1,0 +1,4 @@
+interface:
+  display_name: "Orchestrator"
+  short_description: "Plan issues into waves and run parallel Paradev workers"
+  default_prompt: "Use $orchestrator to orchestrate issues 340-343."
