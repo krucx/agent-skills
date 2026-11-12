@@ -26,6 +26,7 @@ change. A `git pull` updates them all.
 git clone git@github.com:krucx/agent-skills.git
 cd agent-skills
 powershell -ExecutionPolicy Bypass -File .\install.ps1
+# or, in PowerShell 7: pwsh -File .\install.ps1
 ```
 
 `install.ps1` runs in Windows PowerShell 5.1 or PowerShell 7 (`pwsh`). It copies each skill

@@ -12,14 +12,16 @@ $ErrorActionPreference = 'Stop'
 $repo = $PSScriptRoot
 $userHome = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
 $stamp = Get-Date -Format 'yyyyMMddHHmmss'
-$backups = Join-Path (Join-Path $userHome '.agents') 'skill-backups'
+$agents = Join-Path $userHome '.agents'
+$backups = Join-Path $agents 'skill-backups'
 $marker = '.agent-skills-install'
 
 function Install-Skill([string]$source, [string]$target) {
   $parent = Split-Path $target -Parent
-  if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+  New-Item -ItemType Directory -Path $parent -Force | Out-Null
 
-  $existing = Get-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
+  # Listing the parent also finds a dangling link, which Get-Item can miss in PowerShell 5.1.
+  $existing = Get-ChildItem -LiteralPath $parent -Force | Where-Object { $_.Name -eq (Split-Path $target -Leaf) }
   if ($existing) {
     if ($existing.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
       # A symlink or junction, e.g. from install.sh under WSL or Git Bash. Delete the link
@@ -28,9 +30,9 @@ function Install-Skill([string]$source, [string]$target) {
     } elseif (Test-Path -LiteralPath (Join-Path $target $marker) -PathType Leaf) {
       Remove-Item -LiteralPath $target -Recurse -Force
     } else {
-      $harness = Split-Path (Split-Path $parent -Parent) -Leaf
-      $backup = Join-Path $backups "$harness-$(Split-Path $target -Leaf)-$stamp"
-      if (-not (Test-Path -LiteralPath $backups)) { New-Item -ItemType Directory -Path $backups -Force | Out-Null }
+      $configDir = Split-Path (Split-Path $parent -Parent) -Leaf
+      $backup = Join-Path $backups "$configDir-$(Split-Path $target -Leaf)-$stamp"
+      New-Item -ItemType Directory -Path $backups -Force | Out-Null
       Move-Item -LiteralPath $target -Destination $backup
       Write-Output "backed up $target -> $backup"
     }
@@ -41,9 +43,11 @@ function Install-Skill([string]$source, [string]$target) {
   Write-Output "copied $source -> $target"
 }
 
+$agentsSkills = Join-Path $agents 'skills'
+$claudeSkills = Join-Path (Join-Path $userHome '.claude') 'skills'
 foreach ($skill in Get-ChildItem -LiteralPath (Join-Path $repo 'skills') -Directory) {
-  Install-Skill $skill.FullName (Join-Path (Join-Path (Join-Path $userHome '.agents') 'skills') $skill.Name)
-  Install-Skill $skill.FullName (Join-Path (Join-Path (Join-Path $userHome '.claude') 'skills') $skill.Name)
+  Install-Skill $skill.FullName (Join-Path $agentsSkills $skill.Name)
+  Install-Skill $skill.FullName (Join-Path $claudeSkills $skill.Name)
 }
 
 $hermes = Join-Path $userHome '.hermes'
