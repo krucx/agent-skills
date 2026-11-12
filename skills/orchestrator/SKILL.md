@@ -237,15 +237,15 @@ Repair the plan before applying any transition:
 
 `<skill-dir>/scripts/wait-change.sh <project-id> <plan-file>` polls each minute; exits when a
 plan (or adoptable) workspace's agent state, group tag or PR (appears, merges, closes) changes
-or it vanishes, else after 20 minutes. Background it if the harness notifies on exit, else foreground with a short
-timeout (`wait-change.sh <project-id> <plan-file> 120`). On exit: `plan.sh heartbeat` (stop on
-exit 3), [reconcile](#reconcile), apply transitions, dispatch, print the
-[status table](#status-table) if changed, restart unless finished.
+or it vanishes, else after 20 minutes. Background it if the harness notifies on exit, else
+foreground with a short timeout (`wait-change.sh <project-id> <plan-file> 120`). On exit:
+`plan.sh heartbeat` (stop on exit 3), [reconcile](#reconcile), apply transitions, dispatch, print
+the [status table](#status-table) if changed, restart unless finished.
 
 Read: `superset terminals read --local --workspace <id> --terminal <tid>`. Send an answer or
 message: `superset terminals send --local --workspace <id> --terminal <tid> --text "<answer>"`.
 `idle` is not done while background work (e.g. code-review subagents) runs: before any `idle`
-row, read the screen; if it runs, no transition or follow-up: keep watching.
+row, read the screen; while it runs, skip the row (no transition, no follow-up, not counted).
 
 | Seen | Do |
 | --- | --- |
