@@ -1,2 +1,4 @@
 # Bash scripts must keep LF endings, even in a Windows clone with core.autocrlf=true.
 *.sh text eol=lf
+# The test shims are bash scripts without the extension.
+skills/*/scripts/test/bin/* text eol=lf
