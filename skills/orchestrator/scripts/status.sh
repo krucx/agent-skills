@@ -12,6 +12,8 @@
 #   missing                true when the plan lists it but Paradev no longer has it
 #   agent {terminal,state} state is working | idle | blocked | none
 #   pr                     newest PR for the branch {number,url,state,isDraft}, or null
+#
+# gh and Paradev list calls are retried 3 times, RETRY_DELAY (default 5) seconds apart, doubling.
 set -euo pipefail
 
 project=$1
@@ -51,7 +53,12 @@ untagged=$(jq -c --argjson tagged "$tagged" \
   '[.[] | select(.id as $id | $tagged | map(.id) | index($id) | not)]' <<<"$planned")
 extra=$(jq -c '.[]' <<<"$untagged" | while IFS= read -r p; do
   id=$(jq -r .id <<<"$p")
-  if ws=$(retry "$cli" workspaces get "$id" --local --json 2>/dev/null); then
+  if ws=$("$cli" workspaces get "$id" --local --json 2>/dev/null); then
+    jq -c '{id, name, branch, group: null, missing: false}' <<<"$ws"
+  # Missing only if the project's full list (retried) lacks it; if that fails too, fail.
+  elif ! listed=$(retry "$cli" workspaces list --local --project "$project" --json); then
+    exit 1
+  elif ws=$(jq -ce --arg id "$id" '.[] | select(.id == $id)' <<<"$listed"); then
     jq -c '{id, name, branch, group: null, missing: false}' <<<"$ws"
   else
     jq -c '{id, name: null, branch, group: null, missing: true}' <<<"$p"

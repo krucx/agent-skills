@@ -3,7 +3,7 @@
 # a worker's agent state, a workspace's group tag, a workspace disappearing, or a PR
 # appearing, merging or closing. Only plan workspaces count, plus tagged ones whose branch
 # matches a plan item without a workspace (Reconcile adopts those); with no plan, all count.
-# Checks once a minute. When it exits, act on what changed and start it again.
+# Checks once a minute (POLL_SECONDS). When it exits, act on what changed and start it again.
 #
 # Usage: wait-change.sh <project-id> [plan-file] [timeout-seconds]   (default 1200)
 # Prints the workspaces that changed, with their old values; prints "timeout" if none did.

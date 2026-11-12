@@ -23,13 +23,13 @@ file="$HOME/.agents/orchestrator/groups.json"
 GROUPS_JSON='["In Progress","In Review","Done","Blocked"]'
 
 # Fill every group the given object leaves out with the group's own name.
-complete() {
+with_defaults() {
   jq -c --argjson groups "$GROUPS_JSON" '. as $m | reduce $groups[] as $g ({}; .[$g] = ($m[$g] // $g))'
 }
 
 fallback() {
   echo "groups.sh: $1; suggesting the groups' own names" >&2
-  echo '{}' | complete
+  echo '{}' | with_defaults
 }
 
 suggest() {
@@ -46,7 +46,7 @@ suggest() {
     db=${db//%/%25}; db=${db//\?/%3f}; db=${db//#/%23}
     out=$(sqlite3 -json "file:$db?mode=ro" "SELECT tag, display_name FROM tag_folder_settings
       WHERE scope = '$project' ORDER BY tab_order, updated_at DESC" 2>/dev/null) ||
-      { fallback "can't read tag_folder_settings (Paradev's schema may have changed)"; return; }
+      { fallback "can't read tag_folder_settings (Paradev's schema changed, or sqlite3 lacks -json)"; return; }
     rows=$(jq -c --argjson more "${out:-[]}" '. + $more' <<<"$rows")
   done
   jq -c --argjson groups "$GROUPS_JSON" '. as $rows
@@ -58,18 +58,18 @@ suggest() {
 case $mode in
   print)
     if [[ -f $file ]] && jq -e --arg p "$project" 'has($p)' "$file" >/dev/null; then
-      jq -c --arg p "$project" '.[$p]' "$file" | complete
+      jq -c --arg p "$project" '.[$p]' "$file" | with_defaults
     else
-      echo '{}' | complete
+      echo '{}' | with_defaults
       exit 2
     fi ;;
   suggest) suggest ;;
   save)
     map=$(jq -ce --argjson groups "$GROUPS_JSON" '
       select(type == "object" and (keys - $groups == []) and all(.[]; type == "string" and . != ""))' \
-      <<<"${3:?usage: groups.sh <project-id> save <json>}") ||
-      { echo "groups.sh: expected an object of group -> tag, groups: $GROUPS_JSON" >&2; exit 1; }
-    map=$(complete <<<"$map")
+      <<<"${3:?usage: groups.sh <project-id> save <json>}" | with_defaults |
+      jq -ce 'select([.[] | ascii_downcase] | length == (unique | length))') ||
+      { echo "groups.sh: expected an object of group -> distinct tag, groups: $GROUPS_JSON" >&2; exit 1; }
     mkdir -p "$(dirname "$file")"
     [[ -f $file ]] || echo '{}' >"$file"
     jq --arg p "$project" --argjson m "$map" '.[$p] = $m' "$file" >"$file.tmp.$$"
