@@ -62,7 +62,7 @@ desktop app, add an agent instance per harness that runs with auto-approve, for 
 | Codex (auto) | `codex --approve-for-me` |
 
 Gemini's default preset already runs with `--approval-mode=auto_edit`. The orchestrator treats
-an instance as auto when its name contains `(auto)` or its command and args turn on
+an instance as auto when its name (`label`) contains `(auto)` or its command and args turn on
 auto-approve (`claude --permission-mode auto`, `codex --approve-for-me`). When it finds none, it
 warns you and lists the instances it did find.
 
@@ -82,6 +82,6 @@ regular preset, which prompts you, for an item when:
 ### Requirements
 
 `bash`, `jq`, the GitHub CLI (`gh`, signed in), and the Paradev CLI with this machine's host
-running. `superset`, `paradev` and `pdev` are the same CLI, and either name works; the scripts use
+running. `superset`, `paradev` and `pdev` are the same CLI, and any of the three names works; the scripts use
 whichever is on PATH. Pull requests must live on GitHub; the tracker can be GitHub
 Issues, Linear, or Jira (whatever the harness can reach).

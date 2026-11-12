@@ -18,7 +18,7 @@ Claude Code switches to one automatically. Other harnesses keep the model the se
 with. If you can tell you are on a top-tier model there, say once in one line that a smaller
 model would do (the repo README has the launch command), then carry on.
 
-`superset`, `paradev` and `pdev` are the same Paradev CLI, and either name works. This skill
+`superset`, `paradev` and `pdev` are the same Paradev CLI, and any of the three names works. This skill
 writes `superset`; if only `paradev` or `pdev` is on PATH, use that name instead. The scripts
 pick whichever is installed (`superset` first, then `paradev`, then `pdev`). For CLI details
 beyond what is here, `superset <command> --help` is authoritative. `<skill-dir>` is the folder
@@ -142,8 +142,9 @@ case, so keep passing the exact names above.
 
 ## Plan
 
-Steps 1 to 3 are for tracker references. A run of free text only skips them: there is no
-tracker to find or reach, so go straight to step 4.
+Steps 1 to 3 are for tracker references. A run with only free text skips them: there is no
+tracker to find or reach, so go straight to step 4. A mixed run does steps 1 to 3 for its
+tracker references only.
 
 1. **Find the tracker.** Read the `## Agent skills` section of the repo's `AGENTS.md` or
    `CLAUDE.md`. It points to an issue-tracker doc (often `docs/agents/issue-tracker.md`) that
@@ -352,9 +353,10 @@ Each time it exits:
 
 | Seen | Do |
 | --- | --- |
-| `in-progress`, and the branch has a PR | Set `in-review` at once. Opening the PR is the worker's goal, so don't wait for CI or reviews. Read the screen for the worker's `ORCHESTRATOR_WORKER_DONE` block, store its `checked:` line in the item's `checked`, and show it under the status table. |
+| `in-progress`, and the branch has a PR | Set `in-review` at once. Opening the PR is the worker's goal, so don't wait for CI or reviews. Read the screen for the worker's `ORCHESTRATOR_WORKER_DONE` block, store its `checked:` line in the item's `checked`, and show it under the status table. Workers often open the PR before printing the block, so if it isn't there yet, read it again once the agent is `idle`. |
 | `in-review`, agent `working` | The user typed feedback into the worker's chat. Set `feedback`. These don't count toward the parallel limit. |
-| `feedback`, agent `idle` | Set back to `in-review`. |
+| `feedback`, reason "follow-up sent", agent `working` | The worker picked up the follow-up. Clear the reason. |
+| `feedback`, agent `idle` | Set back to `in-review`, unless the reason is still "follow-up sent": then the worker hasn't started yet, so wait. |
 | Agent `blocked` (Paradev's "needs input") | Read the screen with `superset terminals read --local --workspace <id> --terminal <tid>`. Show the user the exact question and send a desktop notification. The user answers in the worker's chat. If they answer in yours instead, pass it on with `superset terminals send --local --workspace <id> --terminal <tid> --text "<answer>"`. Never answer a permission prompt, or decide anything about scope or the product, on the user's behalf. |
 | `in-progress`, agent `idle`, no PR | Read the screen. If the worker printed `ORCHESTRATOR_WORKER_BLOCKED`, or it already had one follow-up, set `blocked` with its reason, free the slot, and tell the user. Otherwise send one follow-up asking it to finish and open the PR. |
 | PR `MERGED` | Set `done`. Dependents that haven't started can now branch from `main`. Send any follow-up waiting on this item (see below). |
@@ -381,15 +383,16 @@ or the worker's summary says so), record it in the item as
 
 When item `<ID>` merges:
 
-1. Write the plan first: set the waiting item to `feedback` and clear its `followUp`.
+1. Write the plan first: set the waiting item to `feedback`, reason "follow-up sent", and clear
+   its `followUp`.
 2. Move its tag to `In Progress`.
 3. Send the message to its worker with
    `superset terminals send --local --workspace <id> --terminal <tid> --text "<message>"`.
 
-It goes back to `in-review` once its agent has picked up the message (`working`) and is `idle`
-again, as for any `feedback` item. If
-`<ID>` fails instead (`blocked`, `skipped`, or its PR closes unmerged), keep the `followUp` and
-tell the user.
+The reason keeps the next reconcile from moving it straight back to `in-review` while its agent
+is still `idle`. Once the agent has worked on the message and is `idle` again, it returns to
+`in-review` as any `feedback` item does. If `<ID>` fails instead (`blocked`, `skipped`, or its
+PR closes unmerged), keep the `followUp` and tell the user.
 
 After the move to `In Review`, the user owns the PR: they read CI and review feedback
 themselves and reply in the worker's chat. Don't read PR comments or checks. Workers open PRs;
