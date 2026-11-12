@@ -1,32 +1,59 @@
 #!/usr/bin/env bash
-# Print one JSON object per orchestrated workspace: everything the orchestrator needs to
-# decide group moves and render the status table.
+# Print one JSON object per workspace the orchestrator should know about: every workspace in
+# the plan, plus every workspace of this project carrying a group tag.
 #
-# Usage: status.sh            (run from inside the repo the workers' PRs belong to)
+# Usage: status.sh <project-id> [plan-file]   (run from inside the repo the PRs belong to)
 #
-# A workspace is "orchestrated" when it carries one of the group tags. Match the output to
-# plan items by workspace id. Agent state comes from `superset snapshot`; PR state comes from
-# GitHub, looked up by the workspace's branch.
+# Fields:
+#   id, name, branch       the workspace as Paradev has it now (branch may differ from the plan)
+#   group                  the group tag it carries, or null
+#   inPlan                 true when the plan lists this workspace ID
+#   missing                true when the plan lists it but Paradev no longer has it
+#   agent {terminal,state} state is working | idle | blocked | none
+#   pr                     newest PR for the branch {number,url,state,isDraft}, or null
 set -euo pipefail
 
+project=$1
+plan=${2:-}
 TAGS=("In Progress" "In Review" "Done" "Blocked")
+
 snapshot=$(superset snapshot --json)
+prs=$(gh pr list --state all --limit 300 --json headRefName,number,url,state,isDraft)
 
-for tag in "${TAGS[@]}"; do
-  superset workspaces list --local --tag "$tag" --json |
+tagged=$(for tag in "${TAGS[@]}"; do
+  superset workspaces list --local --project "$project" --tag "$tag" --json |
     jq -c --arg group "$tag" '.[] | {id, name, branch, group: $group}'
-done | while IFS= read -r ws; do
-  id=$(jq -r .id <<<"$ws")
-  branch=$(jq -r .branch <<<"$ws")
+done | jq -sc '.')
 
-  # First terminal that runs an agent: its state is working | idle | blocked.
-  agent=$(jq -c --arg id "$id" '
-    [.workspaces[] | select(.id == $id) | .terminals[] | select(.agent != null)][0]
-    | if . == null then {terminal: null, state: "none"} else {terminal: .id, state: .agent.state} end
-  ' <<<"$snapshot")
+planned='[]'
+if [[ -n "$plan" && -f "$plan" ]]; then
+  planned=$(jq -c '[.items[] | select(.workspace != null) | {id: .workspace, branch}]' "$plan")
+fi
 
-  pr=$(gh pr list --head "$branch" --state all --limit 1 --json number,url,state,isDraft |
-    jq -c '.[0] // null')
+# Planned workspaces that carry no group tag: look them up one by one.
+untagged=$(jq -c --argjson tagged "$tagged" \
+  '[.[] | select(.id as $id | $tagged | map(.id) | index($id) | not)]' <<<"$planned")
+extra=$(jq -c '.[]' <<<"$untagged" | while IFS= read -r p; do
+  id=$(jq -r .id <<<"$p")
+  if ws=$(superset workspaces get "$id" --local --json 2>/dev/null); then
+    jq -c '{id, name, branch, group: null, missing: false}' <<<"$ws"
+  else
+    jq -c '{id, name: null, branch, group: null, missing: true}' <<<"$p"
+  fi
+done | jq -sc '.')
 
-  jq -c --argjson agent "$agent" --argjson pr "$pr" '. + {agent: $agent, pr: $pr}' <<<"$ws"
-done
+jq -c --argjson tagged "$tagged" --argjson extra "$extra" --argjson planned "$planned" \
+  --argjson snapshot "$snapshot" --argjson prs "$prs" -n '
+  ($planned | map(.id)) as $planIds
+  | ($tagged | map(. + {missing: false})) + $extra
+  | .[]
+  | . as $ws
+  | . + {
+      inPlan: ($planIds | index($ws.id) != null),
+      agent: ([$snapshot.workspaces[] | select(.id == $ws.id) | .terminals[]
+               | select(.agent != null)][0]
+              | if . == null then {terminal: null, state: "none"}
+                else {terminal: .id, state: .agent.state} end),
+      pr: ([$prs[] | select(.headRefName == $ws.branch)][0]
+           | if . == null then null else {number, url, state, isDraft} end)
+    }'

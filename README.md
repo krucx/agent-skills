@@ -29,8 +29,17 @@ change. A `git pull` updates them all.
 | Gemini CLI | "orchestrate issues 340 to 343" (Gemini picks the skill from your words) |
 | Hermes | `/orchestrator 340-343` |
 
-"orchestrator report back" prints the status table at any time, from any harness. The plan
-for each repo lives in `~/.agents/orchestrator/<owner>-<repo>.json`.
+"orchestrator report back" prints the status table at any time, from any harness. It brings
+the groups and the plan up to date, and never starts or messages a worker. "orchestrator
+continue" resumes a run: it starts items that have become ready and watches again.
+
+Each repo has one active run at a time. The plan lives in
+`~/.agents/orchestrator/<owner>-<repo>.json`, and finished runs move to
+`~/.agents/orchestrator/history/`. The plan records which Paradev terminal owns the run:
+
+- A second orchestrator on the same repo is refused while the owner is alive.
+- A run whose owner is gone, or hasn't sent a heartbeat for 45 minutes, can be taken over.
+- Writes are locked and atomic, so an interrupted write never corrupts the plan.
 
 ### Run the orchestrator on a small model
 
@@ -54,6 +63,19 @@ desktop app, add an agent instance per harness whose name contains `(auto)`:
 
 Gemini's default preset already runs with `--approval-mode=auto_edit`. The orchestrator finds
 these instances by name and warns you when one is missing.
+
+What auto mode means:
+- **Claude's auto mode** approves routine actions through a safety classifier and still blocks
+  risky ones.
+- **Codex's `--approve-for-me`** has an automatic reviewer approve requests inside its
+  workspace-write sandbox.
+
+Either way, you don't see each command before it runs. The orchestrator therefore uses the
+regular preset, which prompts you, for an item when:
+- you say `with prompts`;
+- the item was written by someone without write access to the repo;
+- the item touches deployment, releases, infrastructure, credentials, or migrations against
+  real data.
 
 ### Requirements
 
