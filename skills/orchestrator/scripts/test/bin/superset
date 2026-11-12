@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Test shim for the Paradev CLI: answers from JSON fixtures in $FIX instead of a host.
+#   $FIX/snapshot.json    superset snapshot --json
+#   $FIX/workspaces.json  [{id, name, branch, tags}]; list filters by --tag, get by ID
+#   $FIX/screens/<tid>    the text terminals read returns for terminal <tid>
+set -euo pipefail
+arg() { local want=$1; shift; while (($#)); do [[ $1 == "$want" ]] && { echo "$2"; return; }; shift; done; }
+case "$1 ${2:-}" in
+  "snapshot --json") cat "$FIX/snapshot.json" ;;
+  "workspaces list")
+    jq -c --arg tag "$(arg --tag "$@")" \
+      'map(select($tag == "" or ((.tags // "") | ascii_downcase) == ($tag | ascii_downcase)))' \
+      "$FIX/workspaces.json" ;;
+  "workspaces get") jq -ce --arg id "$3" '.[] | select(.id == $id)' "$FIX/workspaces.json" ;;
+  "terminals read")
+    f="$FIX/screens/$(arg --terminal "$@")"
+    [[ -f $f ]] || { echo "terminal not found" >&2; exit 1; }
+    max=$(arg --max-lines "$@")
+    tail -n "${max:-1000}" "$f" | jq -Rsc '{text: .}' ;;
+  *) echo "superset shim: unsupported: $*" >&2; exit 1 ;;
+esac

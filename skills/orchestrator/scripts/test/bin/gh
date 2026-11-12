@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Test shim for the GitHub CLI: pr list answers from $FIX/prs.json (default: no PRs).
+set -euo pipefail
+case "$1 ${2:-}" in
+  "pr list") cat "$FIX/prs.json" 2>/dev/null || echo '[]' ;;
+  *) echo "gh shim: unsupported: $*" >&2; exit 1 ;;
+esac
