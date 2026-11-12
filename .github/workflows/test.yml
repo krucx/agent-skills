@@ -1,0 +1,28 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  orchestrator-scripts:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS's own /bin/bash is 3.2 with BSD date; the runner's PATH bash is a newer Homebrew one.
+          - os: macos-latest
+            bash: /bin/bash
+          # Linux: bash 5 with GNU date.
+          - os: ubuntu-latest
+            bash: bash
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show tool versions
+        run: |
+          ${{ matrix.bash }} --version | head -n 1
+          jq --version
+      - name: Run tests
+        run: ${{ matrix.bash }} skills/orchestrator/scripts/test/run.sh

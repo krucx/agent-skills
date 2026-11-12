@@ -6,7 +6,8 @@
 # Checks once a minute (POLL_SECONDS). When it exits, act on what changed and start it again.
 #
 # Usage: wait-change.sh <project-id> [plan-file] [timeout-seconds]   (default 1200)
-# Prints the workspaces that changed, with their old values; prints "timeout" if none did.
+# Prints one line naming what changed ("changed: #340 agent working->idle, pr none->OPEN; ..."),
+# or "timeout" if nothing did.
 # A failing check (e.g. GitHub unreachable; status.sh already retries) doesn't stop the wait;
 # only if checks still fail at the timeout does it print the error and exit 1.
 set -euo pipefail
@@ -25,7 +26,7 @@ signature() {
   "$here/status.sh" "$project" "$plan" |
     jq -sc --argjson adoptBranches "$adoptBranches" '
       map(select($adoptBranches == null or .inPlan or (.branch as $b | $adoptBranches | index($b) != null))
-        | {id, group, missing, agent: .agent.state, pr: (.pr.state // null)})'
+        | {id, item, group, missing, agent: .agent.state, pr: (.pr.state // null)})'
 }
 
 errfile=$(mktemp "${TMPDIR:-/tmp}/wait-change.XXXXXX")
@@ -39,11 +40,15 @@ while :; do
     if [[ -z $start ]]; then
       start=$now
     else
-      changed=$(jq -c --argjson start "$start" '
+      changed=$(jq -r --argjson start "$start" '
         [.[] | . as $now | ([$start[] | select(.id == $now.id)][0]) as $was
-          | select($was != $now) | {now: $now, was: $was}]' <<<"$now")
-      if [[ "$changed" != "[]" ]]; then
-        jq . <<<"$changed"
+          | select($was != $now)
+          | "\($now.item // $now.id) " + if $was == null then "appeared" else
+              ([("group", "missing", "agent", "pr") as $k | select($was[$k] != $now[$k])
+                | "\($k) \($was[$k] // "none")->\($now[$k] // "none")"] | join(", ")) end]
+        | join("; ")' <<<"$now")
+      if [[ -n "$changed" ]]; then
+        echo "changed: $changed"
         exit 0
       fi
     fi

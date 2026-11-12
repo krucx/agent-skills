@@ -49,14 +49,20 @@ with `jq`, `gh` and `superset` (or `paradev`) on `PATH` there.
 
 "orchestrator report back" prints the status table at any time, from any harness. It brings
 the groups and the plan up to date, and never starts or messages a worker. "orchestrator
-continue" resumes a run: it starts items that have become ready and watches again.
+continue" resumes a run: it starts items that have become ready and watches again. "orchestrator
+close" ends a run that still has blocked or waiting items; they're kept as carry-over, and the
+next run offers to pick them up again. Workspaces are never archived or deleted.
 
 Each repo has one active run at a time. The plan lives in
 `~/.agents/orchestrator/<owner>-<repo>.json`, and finished runs move to
 `~/.agents/orchestrator/history/`. The plan records which Paradev terminal owns the run:
 
 - A second orchestrator on the same repo is refused while the owner is alive.
-- A run whose owner is gone, or hasn't sent a heartbeat for 45 minutes, can be taken over.
+- A run whose owner is gone, or hasn't sent a heartbeat for 45 minutes, can be taken over. If
+  the owner looks alive but is stuck (say, at a usage limit), tell the new orchestrator to "take
+  over" and it forces the takeover.
+- The plan carries its group-to-tag map, so whichever orchestrator picks the run up files
+  workspaces into the same folders.
 - Writes are locked and atomic, so an interrupted write never corrupts the plan.
 
 ### Run the orchestrator on a small model
@@ -114,6 +120,15 @@ a new folder named after it. To change the mapping later, edit that file, or run
 ```
 
 `save` replaces the project's whole mapping; groups it leaves out use their own names.
+
+### Tests
+
+The scripts have a test suite that runs against fake `superset` and `gh` commands, so it needs no
+Paradev host or GitHub access:
+
+```bash
+bash skills/orchestrator/scripts/test/run.sh
+```
 
 ### Requirements
 

@@ -7,15 +7,21 @@
 # Usage (run from inside the repo):
 #   plan.sh path                  print the plan file path for this repo
 #   plan.sh check                 read-only: print none | finished | mine | other | stale
-#   plan.sh claim [--takeover]    may this session start or resume a run? (see exit codes)
+#   plan.sh claim [--takeover [--force]]
+#                                 may this session start or resume a run? (see exit codes)
+#                                 --force takes over even from a live owner; only when the user
+#                                 asks. "free" is followed by the closed run's carryOver, if any.
 #   plan.sh write <json-file>     replace the plan with <json-file> (owner and heartbeat are set)
 #   plan.sh heartbeat             refresh the heartbeat without other changes
+#   plan.sh close                 finish the run now; items not done or skipped go to carryOver
 #
+# An owner is live only while its heartbeat is fresh (under STALE_MINUTES, default 45) and its
+# terminal still runs an agent.
 # Exit codes: 0 ok; 3 another live orchestrator owns the active run (details on stdout);
 # 4 the active run is stale (owner gone or silent) and needs --takeover; 1 anything else.
 set -euo pipefail
 
-STALE_MINUTES=45
+STALE_MINUTES=${STALE_MINUTES:-45}
 dir="$HOME/.agents/orchestrator"
 # owner/repo from the origin remote (git@github.com:o/r.git or https://github.com/o/r), offline.
 repo=$(git remote get-url origin | sed -E 's#(\.git)?/?$##; s#^.*[:/]([^/]+/[^/]+)$#\1#')
@@ -75,11 +81,13 @@ case ${1:-} in
   claim)
     lock
     if [[ ! -f "$plan" ]] || [[ $(jq -r .status "$plan") == finished ]]; then
-      if [[ -f "$plan" ]]; then
-        mkdir -p "$dir/history"
-        mv "$plan" "$dir/history/${repo//\//-}-$(jq -r .runId "$plan").json"
-      fi
       echo "free"
+      if [[ -f "$plan" ]]; then
+        old="$dir/history/${repo//\//-}-$(jq -r .runId "$plan").json"
+        mkdir -p "$dir/history"
+        mv "$plan" "$old"
+        jq -c --arg from "$old" 'select(.carryOver | length > 0) | {carryOver, from: $from}' "$old"
+      fi
       exit 0
     fi
     current=$(jq -r '.owner // "unknown"' "$plan")
@@ -88,23 +96,34 @@ case ${1:-} in
       echo "resumed"
       exit 0
     fi
-    if ! stale; then
+    forced=null
+    if [[ ${2:-} == --takeover && ${3:-} == --force ]]; then
+      forced="\"$now\""
+    elif ! stale; then
       jq -c '{runId, owner, heartbeat}' "$plan"
       exit 3
-    fi
-    if [[ ${2:-} != --takeover ]]; then
+    elif [[ ${2:-} != --takeover ]]; then
       jq -c '{runId, owner, heartbeat, stale: true}' "$plan"
       exit 4
     fi
-    jq --arg me "$me" --arg now "$now" --arg was "$current" \
-      '.owner = $me | .heartbeat = $now | .takenOverFrom = $was' "$plan" | put
-    echo "taken over from $current"
+    jq --arg me "$me" --arg now "$now" --arg was "$current" --argjson forced "$forced" \
+      '.owner = $me | .heartbeat = $now | .takenOverFrom = $was
+       | if $forced then .forcedAt = $forced else del(.forcedAt) end' "$plan" | put
+    echo "taken over from $current${forced:+ (forced)}"
     ;;
-  write)
+  write|close)
     lock
     if [[ -f "$plan" && $(jq -r .status "$plan") == active && $(jq -r '.owner // "unknown"' "$plan") != "$me" ]]; then
       echo "not the owner of the active run; it belongs to $(jq -r .owner "$plan")" >&2
       exit 3
+    fi
+    if [[ $1 == close ]]; then
+      [[ -f "$plan" ]] || { echo "no plan to close" >&2; exit 1; }
+      jq --arg now "$now" '.status = "finished" | .closedAt = $now
+        | .carryOver = [.items[] | select(.state != "done" and .state != "skipped")
+                        | {id, state, reason}]' "$plan" | put
+      jq -c '.carryOver' "$plan"
+      exit 0
     fi
     jq --arg me "$me" --arg now "$now" '.owner = $me | .heartbeat = $now' "$2" | put
     ;;
@@ -114,7 +133,7 @@ case ${1:-} in
     jq --arg now "$now" '.heartbeat = $now' "$plan" | put
     ;;
   *)
-    sed -n '2,16p' "$0"
+    sed -n '2,22p' "$0"
     exit 1
     ;;
 esac
