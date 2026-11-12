@@ -16,12 +16,15 @@ set -euo pipefail
 project=$1
 plan=${2:-}
 TAGS=("In Progress" "In Review" "Done" "Blocked")
+# superset, paradev and pdev are the same Paradev CLI; use whichever is installed.
+cli=$(command -v superset || command -v paradev || command -v pdev) ||
+  { echo "Paradev CLI not found: install superset, paradev or pdev" >&2; exit 1; }
 
-snapshot=$(superset snapshot --json)
+snapshot=$("$cli" snapshot --json)
 prs=$(gh pr list --state all --limit 300 --json headRefName,number,url,state,isDraft)
 
 tagged=$(for tag in "${TAGS[@]}"; do
-  superset workspaces list --local --project "$project" --tag "$tag" --json |
+  "$cli" workspaces list --local --project "$project" --tag "$tag" --json |
     jq -c --arg group "$tag" '.[] | {id, name, branch, group: $group}'
 done | jq -sc '.')
 
@@ -35,7 +38,7 @@ untagged=$(jq -c --argjson tagged "$tagged" \
   '[.[] | select(.id as $id | $tagged | map(.id) | index($id) | not)]' <<<"$planned")
 extra=$(jq -c '.[]' <<<"$untagged" | while IFS= read -r p; do
   id=$(jq -r .id <<<"$p")
-  if ws=$(superset workspaces get "$id" --local --json 2>/dev/null); then
+  if ws=$("$cli" workspaces get "$id" --local --json 2>/dev/null); then
     jq -c '{id, name, branch, group: null, missing: false}' <<<"$ws"
   else
     jq -c '{id, name: null, branch, group: null, missing: true}' <<<"$p"
