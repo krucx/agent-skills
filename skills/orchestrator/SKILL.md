@@ -46,9 +46,10 @@ a live orchestrator owns it; start nothing, name its terminal, offer a report ba
 stale (terminal gone, or no heartbeat for 45 minutes); Continue runs `plan.sh claim --takeover`
 and says so in one line, Run first asks the user whether to take over and add its items.
 
-Write **only** via `plan.sh write <file>` (whole plan in a scratch temp file, never in place):
-it locks, refuses if another now owns the run, stamps owner and heartbeat, swaps atomically.
-`plan.sh heartbeat` each watch cycle. `write`/`heartbeat` exit 3 (taken over): stop, tell the user.
+Write **only** via `plan.sh write <file>` (whole plan in a scratch temp file; never edit the plan
+file in place): it locks, refuses if another now owns the run, stamps owner and heartbeat, swaps
+atomically. `plan.sh heartbeat` each watch cycle. `write`/`heartbeat` exit 3 (taken over): stop,
+tell the user.
 
 ```json
 {"repo": "owner/repo", "runId": "20261112-2015", "status": "active", "maxParallel": 5,
@@ -59,10 +60,10 @@ it locks, refuses if another now owns the run, stamps owner and heartbeat, swaps
 ```
 
 `status` `active`|`finished`; `plan.sh` adds `owner`, `heartbeat`, `takenOverFrom`. `state`:
-`queued`, `in-progress`, `in-review`, `feedback`, `done`, `blocked`, `waiting` (dependency
-failed), `skipped`; `reason` explains `blocked`/`waiting`/`skipped`. `text`: free-text task
-description. `preset`: `auto`|`regular`. `checked`: worker's `checked:` line. `followUp`: `null`
-or `{"after": "<ID>", "message": "<text>"}` ([after a merge](#follow-ups-after-a-merge)).
+`queued`, `in-progress`, `in-review`, `feedback`, `done`, `blocked`, `waiting` (dependency failed),
+`skipped`; `reason` explains `blocked`/`waiting`/`skipped`. `text`: free-text task's full
+description. `preset`: `auto`|`regular`. `checked`: worker's `checked:` line. `followUp`: `null` or
+`{"after": "<ID>", "message": "<text>"}` ([after a merge](#follow-ups-after-a-merge)).
 
 Facts (workspace, branch, agent and PR state) come from Paradev and GitHub; intent (items,
 dependencies, skill, agent, why waiting/blocked/skipped) from the plan. Write the plan, then the
@@ -71,8 +72,8 @@ from reconciled state.
 
 ## Groups
 
-Tags file workspaces into same-named sidebar folders; one each, exact names (shown lowercase,
-`in progress`/`in review`; lookups ignore case). Move by replacing:
+Tags file workspaces into same-named sidebar folders. Each workspace has exactly one; use exact
+names (shown lowercase, `in progress`/`in review`; lookups ignore case). Move by replacing:
 `superset workspaces update <id> --local --tag "In Review"`.
 
 | Group | Item state |
@@ -151,7 +152,7 @@ merge.
 most 4 words; branch at most 60 characters, no edge hyphens. Taken in
 `git ls-remote --heads origin <branch>`, `git rev-parse --verify --quiet refs/heads/<branch>`,
 the plan, or `superset workspaces list --local --project <id> --search <branch> --json`: append
-`-2`, `-3`, … Never reuse a branch you didn't create for this item.
+`-2`, `-3`, … until free. Never reuse a branch you didn't create for this item.
 
 **Write the plan first** (`in-progress`, branch set), then:
 
@@ -217,16 +218,17 @@ orchestrator coordinates the run; the others are working on <other IDs>.
 
 ## Reconcile
 
-Each watch cycle, Continue, Report back: `<skill-dir>/scripts/status.sh <project-id> <plan-file>`
-gives a JSON line per planned or group-tagged workspace: `group`, `inPlan`, `missing` (planned,
-not in Paradev), `branch`, agent `state` (`working`, `idle`, `blocked`, `none`), terminal,
-newest PR. Repair the plan first:
+At the start of each watch cycle, Continue and Report back, run
+`<skill-dir>/scripts/status.sh <project-id> <plan-file>`. It gives a JSON line per planned or
+group-tagged workspace: `group`, `inPlan`, `missing` (planned, not in Paradev), `branch`, agent
+`state` (`working`, `idle`, `blocked`, `none`), terminal, newest PR.
+Repair the plan before applying any transition:
 
 | Found | Do |
 | --- | --- |
 | Started, workspace `missing` | Follow its PR (open `in-review`, merged `done`), note "workspace gone"; no PR: `blocked`, "workspace missing". |
 | Branch differs from plan | Store it, note the rename; PR lookups follow it. |
-| `in-progress`, no workspace ID (crash after plan write) | Search as in collisions above: record it, else `queued`. |
+| `in-progress`, no workspace ID (crash after plan write) | `superset workspaces list --local --project <id> --search <branch> --json`: record a found workspace, else `queued`. |
 | Tagged, not in plan | Ignore (maybe the user's) unless its branch matches a workspace-less item: adopt. |
 | Tag `Blocked`/`Done`, plan disagrees | User moved it (plan-first excludes interruption): accept; `Blocked` reason "moved by user". |
 | Other tag/state mismatch | Re-apply the state's group. |
@@ -255,10 +257,11 @@ message: `superset terminals send --local --workspace <id> --terminal <tid> --te
 | PR `CLOSED` unmerged | `blocked`, "PR closed unmerged"; tell the user. |
 
 **Dependency fails** (`blocked`, `skipped`, PR closed unmerged): queued dependents `waiting`,
-"waiting on <ID>: <its reason>"; never start, re-plan or drop it yourself. Started (stacked)
-ones run on, noted "built on <ID>, which is <state>" for the user to judge. Tell the user once;
-they unblock it, tell you to drop it ("start #345 anyway"), or skip dependents; act in Continue,
-or now if running. Recovered (`in-review`/`done`): `waiting` dependents back to `queued`.
+"waiting on <ID>: <its reason>"; never start them, re-plan them or drop the dependency yourself.
+Started (stacked) ones run on, noted "built on <ID>, which is <state>" for the user to judge. Tell
+the user once; they unblock it, tell you to drop it ("start #345 anyway"), or skip dependents; act
+in Continue, or now if running. Recovered (`in-review`/`done`): `waiting` dependents back to
+`queued`.
 
 ### Follow-ups after a merge
 
@@ -288,9 +291,10 @@ on `waiting` items, dispatch, watch.
 ## Report back
 
 Never starts, messages or nudges workers. Load the plan (none: use `status.sh <project-id>`),
-reconcile, derive transitions. `plan.sh check` (read-only): `mine`/`finished` write; `stale`
-`plan.sh claim --takeover` (say so in one line), write; `other`: show unwritten, name the
-`owner`. Print the table and only what needs the user; list ready items with
+reconcile, derive transitions. `plan.sh check` (read-only): `mine`/`finished`: write the plan
+and move the tags; `stale`: `plan.sh claim --takeover` (say so in one line), then the same;
+`other`: show the reconciled table without writing, naming the `owner`. Print the table plus a
+line or two only on what needs the user; list ready items with
 "say 'orchestrator continue' to start them".
 
 ## Status table
@@ -307,8 +311,8 @@ One row per run item, plan order:
 | #346 | Backup retention | Waiting (#342 blocked) | — | — |
 ```
 
-`Agent`: `running` (`working`), `waiting for input` (`blocked`, or asked), `done` (`idle`, part
-finished), `—` (no worker). `Group`: sidebar group, `Queued (after <ID>)`, `Waiting (<reason>)`,
-`Skipped`. Below it only: worker questions, `Blocked` reasons, dependency decisions, closed PRs,
-missing workspaces, a just-in-review item's `checked` ("#340 checked: ran the CI workflow on a
-fork; Pester cache hit on the second run").
+`Agent`: `running` (`working`), `waiting for input` (Paradev `blocked`, or it asked a question),
+`done` (`idle`, part finished), `—` (no worker). `Group`: sidebar group, `Queued (after <ID>)`,
+`Waiting (<reason>)`, `Skipped`. Below it only: worker questions, `Blocked` reasons, dependency
+decisions, closed PRs, missing workspaces, a just-in-review item's `checked`
+("#340 checked: ran the CI workflow on a fork; Pester cache hit on the second run").
