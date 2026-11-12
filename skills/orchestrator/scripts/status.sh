@@ -6,26 +6,41 @@
 #
 # Fields:
 #   id, name, branch       the workspace as Paradev has it now (branch may differ from the plan)
-#   group                  the group tag it carries, or null
+#   group                  its logical group (In Progress, In Review, Done, Blocked; tags mapped
+#                          by groups.sh), or null
 #   inPlan                 true when the plan lists this workspace ID
 #   missing                true when the plan lists it but Paradev no longer has it
 #   agent {terminal,state} state is working | idle | blocked | none
 #   pr                     newest PR for the branch {number,url,state,isDraft}, or null
+#
+# gh and Paradev list calls are retried 3 times, RETRY_DELAY (default 5) seconds apart, doubling.
 set -euo pipefail
 
 project=$1
 plan=${2:-}
-TAGS=("In Progress" "In Review" "Done" "Blocked")
+here=$(cd "$(dirname "$0")" && pwd)
 # superset, paradev and pdev are the same Paradev CLI; use whichever is installed.
 cli=$(command -v superset || command -v paradev || command -v pdev) ||
   { echo "Paradev CLI not found: install superset, paradev or pdev" >&2; exit 1; }
 
-snapshot=$("$cli" snapshot --json)
-prs=$(gh pr list --state all --limit 300 --json headRefName,number,url,state,isDraft)
+# Run a gh or Paradev call, retrying transient failures (e.g. "error connecting to
+# api.github.com") with backoff; print its output only once it succeeds.
+retry() {
+  local i out
+  for i in 1 2 3; do
+    out=$("$@") && { printf '%s\n' "$out"; return; }
+    ((i < 3)) && sleep $((i * ${RETRY_DELAY:-5}))
+  done
+  return 1
+}
 
-tagged=$(for tag in "${TAGS[@]}"; do
-  "$cli" workspaces list --local --project "$project" --tag "$tag" --json |
-    jq -c --arg group "$tag" '.[] | {id, name, branch, group: $group}'
+groups=$("$here/groups.sh" "$project") || (($? == 2))
+snapshot=$(retry "$cli" snapshot --json)
+prs=$(retry gh pr list --state all --limit 300 --json headRefName,number,url,state,isDraft)
+
+tagged=$(jq -r 'to_entries[] | "\(.key)\t\(.value)"' <<<"$groups" | while IFS=$'\t' read -r group tag; do
+  retry "$cli" workspaces list --local --project "$project" --tag "$tag" --json |
+    jq -c --arg group "$group" '.[] | {id, name, branch, group: $group}' || exit 1
 done | jq -sc '.')
 
 planned='[]'
@@ -39,6 +54,11 @@ untagged=$(jq -c --argjson tagged "$tagged" \
 extra=$(jq -c '.[]' <<<"$untagged" | while IFS= read -r p; do
   id=$(jq -r .id <<<"$p")
   if ws=$("$cli" workspaces get "$id" --local --json 2>/dev/null); then
+    jq -c '{id, name, branch, group: null, missing: false}' <<<"$ws"
+  # Missing only if the project's full list (retried) lacks it; if that fails too, fail.
+  elif ! listed=$(retry "$cli" workspaces list --local --project "$project" --json); then
+    exit 1
+  elif ws=$(jq -ce --arg id "$id" '.[] | select(.id == $id)' <<<"$listed"); then
     jq -c '{id, name, branch, group: null, missing: false}' <<<"$ws"
   else
     jq -c '{id, name: null, branch, group: null, missing: true}' <<<"$p"

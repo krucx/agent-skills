@@ -36,6 +36,9 @@ All modes; stop with a clear message on failure:
    first, scoping them to its workspaces.
 4. **Plan file**: `<skill-dir>/scripts/plan.sh path` gives `~/.agents/orchestrator/<owner>-<repo>.json`.
 5. Run/Continue: [worker agents](#worker-agents-and-auto-approval).
+6. Run/Continue: **group tags**: `<skill-dir>/scripts/groups.sh <project-id>` exits 2 if unsaved:
+   show `groups.sh <project-id> suggest` (reads Paradev's undocumented host DB read-only; first
+   setup only), ask once to confirm/edit, `groups.sh <project-id> save '<json>'`.
 
 ## Plan file and ownership
 
@@ -72,9 +75,9 @@ from reconciled state.
 
 ## Groups
 
-Tags file workspaces into same-named sidebar folders. Each workspace has exactly one; use exact
-names (shown lowercase, `in progress`/`in review`; lookups ignore case). Move by replacing:
-`superset workspaces update <id> --local --tag "In Review"`.
+Tags file workspaces into sidebar folders. Each workspace has exactly one; every `--tag` uses the
+group's mapped tag from `groups.sh <project-id>` (lookups ignore case). Move by replacing:
+`superset workspaces update <id> --local --tag "<In Review's tag>"`.
 
 | Group | Item state |
 | --- | --- |
@@ -161,7 +164,7 @@ superset workspaces create --local --project <project-id> \
   --name "<ID> <short title>" \
   --branch <branch> --skip-branch-prefix \
   --base-branch <main, or the dependency's branch> \
-  --tag "In Progress" \
+  --tag "<In Progress's tag>" \
   --agent <auto instance id, or preset id> \
   --prompt "<worker prompt>" \
   --json
@@ -220,8 +223,8 @@ orchestrator coordinates the run; the others are working on <other IDs>.
 
 At the start of each watch cycle, Continue and Report back, run
 `<skill-dir>/scripts/status.sh <project-id> <plan-file>`. It gives a JSON line per planned or
-group-tagged workspace: `group`, `inPlan`, `missing` (planned, not in Paradev), `branch`, agent
-`state` (`working`, `idle`, `blocked`, `none`), terminal, newest PR.
+group-tagged workspace: `group` (logical name), `inPlan`, `missing` (planned, not in Paradev),
+`branch`, agent `state` (`working`, `idle`, `blocked`, `none`), terminal, newest PR.
 Repair the plan before applying any transition:
 
 | Found | Do |
@@ -240,7 +243,8 @@ plan (or adoptable) workspace's agent state, group tag or PR (appears, merges, c
 or it vanishes, else after 20 minutes. Background it if the harness notifies on exit, else
 foreground with a short timeout (`wait-change.sh <project-id> <plan-file> 120`). On exit:
 `plan.sh heartbeat` (stop on exit 3), [reconcile](#reconcile), apply transitions, dispatch, print
-the [status table](#status-table) if changed, restart unless finished.
+the [status table](#status-table) if changed, restart unless finished. Exit non-zero (checks
+failed until timeout): check connectivity, reconcile, restart.
 
 Read: `superset terminals read --local --workspace <id> --terminal <tid>`. Send an answer or
 message: `superset terminals send --local --workspace <id> --terminal <tid> --text "<answer>"`.
