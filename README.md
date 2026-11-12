@@ -97,6 +97,24 @@ regular preset, which prompts you, for an item when:
 - the item touches deployment, releases, infrastructure, credentials, or migrations against
   real data.
 
+### Groups map to your own sidebar folders
+
+Paradev files workspaces into sidebar folders by tag, and the folder name you see can differ
+from its tag (a folder you renamed "blocked" may be tagged `new group-6`). So the orchestrator
+doesn't create duplicate folders, the first run in a project suggests which of your folders to use
+for In Progress, In Review, Done and Blocked, matching folder names (it reads Paradev's internal
+database once, read-only), and saves your confirmed choice in
+`~/.agents/orchestrator/groups.json`, keyed by project ID. A group with no folder of that name gets
+a new folder named after it. To change the mapping later, edit that file, or run:
+
+```bash
+~/.agents/skills/orchestrator/scripts/groups.sh <project-id>                       # show it
+~/.agents/skills/orchestrator/scripts/groups.sh <project-id> suggest               # re-suggest
+~/.agents/skills/orchestrator/scripts/groups.sh <project-id> save '{"Blocked": "new group-6"}'
+```
+
+`save` replaces the project's whole mapping; groups it leaves out use their own names.
+
 ### Requirements
 
 `bash`, `jq`, the GitHub CLI (`gh`, signed in), and the Paradev CLI with this machine's host
