@@ -9,108 +9,72 @@ argument-hint: items like "340-343, 345 onwards", "ENG-12 ENG-15", free text, "r
 
 # Orchestrator
 
-You are the coordinator. You plan, dispatch, watch, move workspaces between groups, and report.
-You never implement work yourself, even a small change: each item gets its own worker,
-workspace, branch and PR.
+You coordinate (plan, dispatch, watch, move groups, report); never implement, even a little:
+each item gets its own worker, workspace, branch and PR. Coordinating is cheap: Claude Code
+picks a small or mid-sized model; elsewhere, if you're top-tier, say once in one line that a
+smaller one would do (README has the launch command).
 
-Coordinating is cheap work, so this skill is meant to run on a small or mid-sized model.
-Claude Code switches to one automatically. Other harnesses keep the model the session started
-with. If you can tell you are on a top-tier model there, say once in one line that a smaller
-model would do (the repo README has the launch command), then carry on.
-
-`superset`, `paradev` and `pdev` are the same Paradev CLI, and any of the three names works. This skill
-writes `superset`; if only `paradev` or `pdev` is on PATH, use that name instead. The scripts
-pick whichever is installed (`superset` first, then `paradev`, then `pdev`). For CLI details
-beyond what is here, `superset <command> --help` is authoritative. `<skill-dir>` is the folder
-this file is in (usually `~/.agents/skills/orchestrator`). Run every script from inside the repo.
+`superset`, `paradev`, `pdev`: one CLI (scripts try that order); this file writes `superset`,
+use whichever is on PATH; its `--help` is authoritative. `<skill-dir>`: this file's folder
+(usually `~/.agents/skills/orchestrator`). Run scripts inside the repo.
 
 ## Modes
 
-| The user says | Mode | May it start or message workers? |
+| The user says | Mode | Start/message workers? |
 | --- | --- | --- |
 | items to work on ("orchestrate 340-343") | **Run** | yes |
 | "orchestrator continue" / "resume" | **Continue**: pick up the existing run | yes |
 | "orchestrator report back" / "status" | **Report back** | no, never |
 
-Every mode starts with [Preflight](#preflight).
-
 ## Preflight
 
-Stop with a clear message if any of these fail:
+All modes; stop with a clear message on failure:
 
-1. `bash`, `jq`, `git`, `gh` and the Paradev CLI (`superset`, `paradev` or `pdev`) are on PATH,
-   `gh auth status` passes, and `superset auth whoami --json` works.
-2. The repo is on GitHub: `gh repo view --json nameWithOwner`.
-3. **Project ID**: in `superset projects list --json`, the project whose name matches the repo.
-   The scripts take it as their first argument, so they only see this project's workspaces.
+1. `bash`, `jq`, `git`, `gh`, CLI on PATH; `gh auth status`, `superset auth whoami --json` pass.
+2. Repo on GitHub: `gh repo view --json nameWithOwner`.
+3. **Project ID**: repo-named project in `superset projects list --json`; scripts take it
+   first, scoping them to its workspaces.
 4. **Plan file**: `<skill-dir>/scripts/plan.sh path` gives `~/.agents/orchestrator/<owner>-<repo>.json`.
-5. **Worker agents** (Run and Continue only): see [Worker agents and auto-approval](#worker-agents-and-auto-approval).
+5. Run/Continue: [worker agents](#worker-agents-and-auto-approval).
 
-## The plan file and run ownership
+## Plan file and ownership
 
-Each repo has at most **one active run**, owned by one orchestrator at a time. The owner is the
-Paradev terminal the orchestrator runs in (`$SUPERSET_TERMINAL_ID`), recorded in the plan with a
-heartbeat. `plan.sh` enforces this:
+One **active run** per repo, owned by an orchestrator's terminal (`$SUPERSET_TERMINAL_ID`) with
+a heartbeat. `plan.sh claim` before Run/Continue: `free` (no plan, or last run finished, now in
+`~/.agents/orchestrator/history/`): new plan. `resumed`: yours; a Run adds items to it. Exit 3:
+a live orchestrator owns it; start nothing, name its terminal, offer a report back. Exit 4:
+stale (terminal gone, or no heartbeat for 45 minutes); Continue runs `plan.sh claim --takeover`
+and says so in one line, Run first asks the user whether to take over and add its items.
 
-- `plan.sh claim` before a Run or Continue:
-  - `free`: there is no plan, or the last run finished. That run moves to
-    `~/.agents/orchestrator/history/`; start a new plan.
-  - `resumed`: you already own the active run. For a Run, add the new items to it; don't start
-    a second plan.
-  - exit 3: another orchestrator that is still alive owns the run. Don't start anything. Tell
-    the user which terminal owns it, and offer a report back.
-  - exit 4: the active run is stale (its owner's terminal is gone, or it hasn't sent a heartbeat
-    for 45 minutes). For **Continue**, run `plan.sh claim --takeover` and say so in one line.
-    For a **Run**, ask the user first whether to take over that run and add the new items.
-- **Write only through `plan.sh write <file>`**: write the whole new plan to a temp file in your
-  scratch space, then pass it in. The script takes a lock, refuses if someone else now owns
-  the run, stamps owner and heartbeat, and swaps the file in atomically. Never edit the plan
-  file in place.
-- Run `plan.sh heartbeat` on every watch cycle. If `write` or `heartbeat` exits 3, another
-  orchestrator has taken over: stop watching and tell the user.
-
-Schema:
+Write **only** via `plan.sh write <file>` (whole plan in a scratch temp file; never edit the plan
+file in place): it locks, refuses if another now owns the run, stamps owner and heartbeat, swaps
+atomically. `plan.sh heartbeat` each watch cycle. `write`/`heartbeat` exit 3 (taken over): stop,
+tell the user.
 
 ```json
-{
-  "repo": "owner/repo",
-  "runId": "20261112-2015",
-  "status": "active",
-  "maxParallel": 5,
-  "autoApprove": true,
-  "items": [
-    {"id": "#340", "title": "…", "text": null, "dependsOn": [], "why": "",
-     "skill": "implement", "agent": "claude", "preset": "auto", "state": "queued",
-     "reason": null, "branch": null, "workspace": null, "terminal": null, "pr": null,
-     "checked": null, "followUp": null}
-  ]
-}
+{"repo": "owner/repo", "runId": "20261112-2015", "status": "active", "maxParallel": 5,
+ "autoApprove": true, "items": [{"id": "#340", "title": "…", "text": null, "dependsOn": [],
+ "why": "", "skill": "implement", "agent": "claude", "preset": "auto", "state": "queued",
+ "reason": null, "branch": null, "workspace": null, "terminal": null, "pr": null,
+ "checked": null, "followUp": null}]}
 ```
 
-`status` is `active` or `finished`; `owner`, `heartbeat` and `takenOverFrom` are added by
-`plan.sh`. Item `state` is one of `queued`, `in-progress`, `in-review`, `feedback`, `done`,
-`blocked`, `waiting` (a dependency failed) or `skipped`. `reason` explains `blocked`, `waiting`
-and `skipped`. `text` holds a free-text task's full description. `preset` is `auto` or
-`regular` (see [Worker agents and auto-approval](#worker-agents-and-auto-approval)). `checked` is
-the worker's `checked:` line from its done block. `followUp` is `null` or
-`{"after": "<ID>", "message": "<text>"}`: work the worker still owes once item `<ID>` merges
-(see [Follow-ups after a merge](#follow-ups-after-a-merge)).
+`status` `active`|`finished`; `plan.sh` adds `owner`, `heartbeat`, `takenOverFrom`. `state`:
+`queued`, `in-progress`, `in-review`, `feedback`, `done`, `blocked`, `waiting` (dependency failed),
+`skipped`; `reason` explains `blocked`/`waiting`/`skipped`. `text`: free-text task's full
+description. `preset`: `auto`|`regular`. `checked`: worker's `checked:` line. `followUp`: `null` or
+`{"after": "<ID>", "message": "<text>"}` ([after a merge](#follow-ups-after-a-merge)).
 
-## Sources of truth
-
-- **Facts come from Paradev and GitHub**: whether a workspace exists, its current branch, its
-  agent's state, and the PR's state.
-- **Intent comes from the plan**: which items are in the run, their dependencies, skill, agent,
-  and why something is waiting, blocked or skipped.
-- **Groups follow from item state.** Always write the plan first and move the tag second. Then
-  an interrupted update leaves the plan ahead of the tag, and the next reconcile re-applies the
-  tag.
-- The status table is rendered only from reconciled state, so it always matches the saved plan.
+Facts (workspace, branch, agent and PR state) come from Paradev and GitHub; intent (items,
+dependencies, skill, agent, why waiting/blocked/skipped) from the plan. Write the plan, then the
+tag, so an interruption leaves the plan ahead for reconcile to re-tag. Status tables come only
+from reconciled state.
 
 ## Groups
 
-Groups are workspace tags. Each tag files a workspace into the sidebar folder of the same name.
-Use these exact names:
+Tags file workspaces into same-named sidebar folders. Each workspace has exactly one; use exact
+names (shown lowercase, `in progress`/`in review`; lookups ignore case). Move by replacing:
+`superset workspaces update <id> --local --tag "In Review"`.
 
 | Group | Item state |
 | --- | --- |
@@ -119,126 +83,78 @@ Use these exact names:
 | `Done` | `done` |
 | `Blocked` | `blocked` |
 
-To move a workspace, replace its tags:
-`superset workspaces update <id> --local --tag "In Review"`.
-A workspace carries exactly one of these tags at a time.
+## Requests
 
-Paradev stores and shows tags in lowercase (`in progress`, `in review`). Tag lookups ignore
-case, so keep passing the exact names above.
-
-## What the user can ask for
-
-- **Tracker references**: `340-343` (both ends included), `345 onwards` (every open item from
-  345 up), `#350`, `ENG-123`, `PROJ-7`. Mixed lists are fine.
-- **Free text**: "orchestrate: add CSV export, fix the login redirect, …".
-- **Per-run options**, which may also apply to a subset of items:
-  - the worker skill: `using /implement-spec` (default `implement`);
-  - the worker agent: `with codex` (default: the harness you are running in);
-  - parallelism: `with 3 agents` (default 5, never more than 5);
-  - prompts: `with prompts` starts workers on the regular preset instead of an auto-approve one.
-
-  For example, "340-343 using /implement, 344-345 using /implement-spec" gives each item its
-  own skill.
+- Refs, mixable: `340-343` (inclusive), `345 onwards` (open items from 345 up), `#350`,
+  `ENG-123`, `PROJ-7`; or free text ("orchestrate: add CSV export, fix the login redirect, …").
+- Options, per run or subset ("340-343 using /implement, 344-345 using /implement-spec"):
+  `using /implement-spec` (default `implement`); `with codex` (default: your harness);
+  `with 3 agents` (default 5, never more than 5); `with prompts` (regular preset).
 
 ## Plan
 
-Steps 1 to 3 are for tracker references. A run with only free text skips them: there is no
-tracker to find or reach, so go straight to step 4. A mixed run does steps 1 to 3 for its
-tracker references only.
+Steps 1–3 only for tracker refs (free-text-only runs start at 4).
 
-1. **Find the tracker.** Read the `## Agent skills` section of the repo's `AGENTS.md` or
-   `CLAUDE.md`. It points to an issue-tracker doc (often `docs/agents/issue-tracker.md`) that
-   says which tracker the repo uses and how to read it. With no such doc, go by the reference
-   shape: `#340` or a bare number means GitHub Issues through `gh`; `ABC-123` means Linear or
-   Jira, so ask which if you can't tell.
-2. **Check that you can reach the tracker** with whatever this harness has: `gh` for GitHub,
-   `superset tasks get <KEY> --tracker linear --json` for Linear, or the harness's own Linear or
-   Jira tools. If you can't reach it, stop before planning and tell the user how to connect it
-   (for example connecting Linear in Paradev, or `superset plugins install linear`). Don't
-   install or connect anything yourself.
-3. **Expand and fetch.** Turn ranges into item IDs, then read each item's title, body, labels and
-   author. Drop items that are closed, are pull requests, already have an open PR, or are
-   already in the plan. Mark items labelled `needs-info` or `needs-triage`, and items too vague
-   to implement, as `skipped`. Name every item you drop or skip and give the reason.
-4. **Free text becomes tasks.** Split the text into tasks that each make one reviewable PR, with
-   IDs `T1`, `T2`, …, a title, the full task text a worker needs, and dependencies. Show the
-   breakdown and **wait for the user's go**: splitting free text is the biggest judgment call in
-   a run. Ask only for the go in that message. Tasks stay plan-only. Once the user has given
-   the go, offer once, in a separate message, to file them in the tracker, and file them only if
-   the user says yes. Never ask for the go and offer to file in the same question.
-5. **Find dependencies.**
-   - *Explicit*: "blocked by", "depends on", "after", parent and child links.
-   - *Conflicts*: items that will clearly edit the same files, migration, config or schema.
-     Treat these as a dependency, smaller item first, so the user doesn't end up untangling
-     merge conflicts.
-
-   If a dependency is outside the run: a closed-as-completed issue counts as met. One that is
-   open but not in the run, or was skipped, makes the dependent `waiting`, with that dependency
-   named as the reason.
-6. **Order the work into waves** of at most the parallel limit. Start independent items first;
-   when choosing between them, prefer the ones that unblock others.
-7. **Save the plan** with `plan.sh write`. The `runId` is the start time as `YYYYMMDD-HHMM`.
-8. **Show the plan** as one short table (item, title, wave, depends on, skill, agent), then
-   dispatch straight away. Stop and ask instead if the dependencies form a cycle, or if it's
-   unclear whether two items should be one PR. Free-text runs have already waited for the go
-   in step 4.
+1. **Tracker**: per the doc that `## Agent skills` in `AGENTS.md`/`CLAUDE.md` points to (often
+   `docs/agents/issue-tracker.md`); else `#340`/bare number is GitHub Issues (`gh`), `ABC-123`
+   Linear or Jira (ask if unclear).
+2. **Reach it** (`gh`, `superset tasks get <KEY> --tracker linear --json`, harness tools), else
+   stop before planning and say how to connect (Linear in Paradev, or
+   `superset plugins install linear`). Never install or connect anything yourself.
+3. **Fetch** expanded items' title, body, labels, author. Drop closed ones, pull requests, ones
+   with an open PR or already planned; `skipped`: `needs-info`/`needs-triage` labels or too
+   vague. Name each dropped/skipped item and why.
+4. **Free text → tasks** `T1`, `T2`, … (one reviewable PR each; title, full text,
+   dependencies). Show them; **wait for the go** (biggest judgment call), asking only that.
+   Tasks stay plan-only; after the go, separately (never in one question), offer once to file
+   them; file only on yes.
+5. **Dependencies**: explicit ("blocked by", "depends on", "after", parent/child) and conflicts
+   (clearly same files, migration, config or schema; smaller first). Outside the run:
+   closed-as-completed is met; open-not-in-run or skipped makes the dependent `waiting`, naming it.
+6. **Waves** ≤ parallel limit: independent first, preferring unblockers.
+7. **Save** via `plan.sh write`; `runId` = start time `YYYYMMDD-HHMM`.
+8. **Show** a short table (item, title, wave, depends on, skill, agent) and dispatch at once;
+   ask instead on a dependency cycle or if two items might be one PR.
 
 ## Worker agents and auto-approval
 
-Workers stall on permission prompts unless they start with auto-approve. Run
-`superset agents list --local --json`. Each instance has `id`, `presetId`, `label`, `command`
-and `args`. An **auto instance** has the harness's `presetId` and either:
-
-- a `label` containing `(auto)`, for example "Claude (auto)"; or
-- a `command` and `args` that turn on auto-approve: `claude` with `--permission-mode auto`
-  (`args` `["--permission-mode", "auto"]` or `["--permission-mode=auto"]`), or `codex` with
-  `--approve-for-me`.
-
-What auto mode allows depends on the harness:
-- **Claude Code `--permission-mode auto`**: a safety classifier approves routine actions without
-  asking, such as edits and builds, and still blocks risky ones, such as destructive commands
-  or actions outside the working tree.
-- **Codex `--approve-for-me`**: an automatic reviewer approves requests inside the
-  workspace-write sandbox.
-
-Either way, the user doesn't see individual commands before they run. That is acceptable for
-implementing an item in its own worktree of a repo the user owns. Use the **regular preset**,
-so the user approves each prompt, when any of these is true:
+Workers stall on prompts without auto-approve. In `superset agents list --local --json`
+(`id`, `presetId`, `label`, `command`, `args`), an **auto instance** has the harness's
+`presetId` and a `label` with `(auto)` ("Claude (auto)"), or `claude` `--permission-mode auto`
+(`args` `["--permission-mode", "auto"]` or `["--permission-mode=auto"]`), or `codex`
+`--approve-for-me`. Claude's classifier approves routine actions (edits, builds), blocking risky
+ones (destructive, outside the worktree); Codex's reviewer approves inside the workspace-write
+sandbox. Unseen commands are fine for an item in its own worktree of the user's repo. Use the
+**regular preset** (user approves each prompt) if:
 
 - the user said `with prompts`;
-- the item was written by someone without write access to the repo (check with
-  `gh api repos/<owner>/<repo>/collaborators/<login>/permission -q .permission`). Its text
-  steers an agent that approves its own commands, so it is untrusted input;
-- the item touches deployment, releases, infrastructure, credentials, or data migrations
-  against real data.
+- the author lacks write access
+  (`gh api repos/<owner>/<repo>/collaborators/<login>/permission -q .permission`): untrusted text
+  steering a self-approving agent;
+- it touches deployment, releases, infrastructure, credentials, or real-data migrations.
 
-Record the choice per item in the plan's `preset` field (`auto` or `regular`), and say in the
-plan table which items use the regular preset. If no auto instance exists for a worker's
-harness, use the regular preset for its items and warn the user once. The warning lists the
-instances you found (`label`, `command` and `args` of each) so the user can see why none
-matched. The repo README explains how to create one.
+The regular preset may itself auto-approve (a plain Claude preset showed "auto mode on"):
+check its `command`/`args` against the rules above, and the screen once started. If so, warn
+the user, ask for a prompting preset, and hold those items until given one.
+
+Record `preset` per item; mark regular ones in the plan table. No auto instance for a harness:
+regular preset for its items; warn once, listing each instance's `label`, `command`, `args`
+(README explains creating one).
 
 ## Dispatch
 
-Start an item when every dependency has a PR (or is met), and fewer than the parallel limit of
-items are `in-progress`. `feedback` items don't count.
+Start an item once each dependency has a PR (or is met) and fewer than the limit are
+`in-progress` (`feedback` excluded); never stack on one in `feedback`: wait for `in-review` or
+merge.
 
-Never start an item stacked on a dependency that is in `feedback`: its worker is reworking that
-branch. Wait until the dependency is back in `in-review` (or merged), then start.
+**Branch**: `issue-340-<slug>`, lowercase key (`eng-123-<slug>`), or `task-<runId>-t1-<slug>`
+(free text). `<slug>`: lowercase ASCII title, runs of other characters replaced by one hyphen, at
+most 4 words; branch at most 60 characters, no edge hyphens. Taken in
+`git ls-remote --heads origin <branch>`, `git rev-parse --verify --quiet refs/heads/<branch>`,
+the plan, or `superset workspaces list --local --project <id> --search <branch> --json`: append
+`-2`, `-3`, … until free. Never reuse a branch you didn't create for this item.
 
-**Choose the branch** before creating anything:
-
-1. Branch name: `issue-340-<slug>` for a GitHub issue, the key in lowercase for other trackers
-   (`eng-123-<slug>`), `task-<runId>-t1-<slug>` for a free-text task. Build `<slug>` from the
-   title: lowercase ASCII, every run of other characters replaced by one hyphen, at most 4
-   words, the whole branch at most 60 characters, with no leading or trailing hyphen.
-2. Check for collisions: `git ls-remote --heads origin <branch>`,
-   `git rev-parse --verify --quiet refs/heads/<branch>`, the other items in the plan, and
-   `superset workspaces list --local --project <id> --search <branch> --json`. If the branch is
-   taken, append `-2`, `-3`, … until it is free. Never reuse a branch you didn't create for this
-   item.
-
-**Write the plan first** (item `in-progress`, branch set), then create:
+**Write the plan first** (`in-progress`, branch set), then:
 
 ```bash
 superset workspaces create --local --project <project-id> \
@@ -251,21 +167,13 @@ superset workspaces create --local --project <project-id> \
   --json
 ```
 
-- `--skip-branch-prefix` keeps the branch exactly as planned, even if Paradev is set to add a
-  prefix.
-- **Stacked work**: if a dependency's PR isn't merged yet, branch from the dependency's branch.
-  Once it merges, use `main`.
-- Don't pass `--model`. Workers use their harness's strongest default model.
-- If `create` fails, set the item back to `queued`, and to `blocked` with the error as the
-  reason on a second failure.
-- If it succeeds, write the workspace ID, the branch Paradev actually reports, and the terminal
-  ID into the plan. The terminal ID is `agents[].sessionId` in the `create` output; `terminals`
-  there may be empty. Only if `sessionId` is missing, take it from `superset snapshot --json`:
-  the terminal in that workspace whose `agent` is set.
+`--skip-branch-prefix` keeps the branch even if Paradev adds a prefix. Stacked: base on an
+unmerged dependency's branch, else `main`. No `--model` (harness default is strongest). Failure:
+`queued`; second failure `blocked`, error as reason. Success: plan gets the workspace ID,
+Paradev's reported branch, terminal ID = `create`'s `agents[].sessionId` (`terminals` may be
+empty); only without `sessionId`, `superset snapshot --json`'s terminal there with `agent` set.
 
 ### Worker prompt
-
-Start the prompt with the skill invocation in the worker's own syntax:
 
 | Worker agent | First line |
 | --- | --- |
@@ -273,10 +181,8 @@ Start the prompt with the skill invocation in the worker's own syntax:
 | Codex | `$<skill> <ID>` |
 | Gemini, others | `Use the <skill> skill to do <ID>.` |
 
-For a free-text task, put its full `text` where `<task text>` stands, straight after the first
-line. For a tracker item, drop `<task text>` and the free-text line.
-
-Fill in the rest and drop the stacked line when it doesn't apply:
+`<task text>`: a free-text task's full `text`; tracker items drop it and the free-text line.
+Drop the stacked line if not stacked.
 
 ```text
 <first line>
@@ -312,136 +218,88 @@ orchestrator coordinates the run; the others are working on <other IDs>.
 
 ## Reconcile
 
-Do this at the start of every watch cycle, of Continue, and of Report back. Run
-`<skill-dir>/scripts/status.sh <project-id> <plan-file>`. It prints one JSON line per workspace
-that is in the plan or carries a group tag in this project, with:
-
-- `group`;
-- `inPlan`;
-- `missing` (the plan has it, Paradev doesn't);
-- the current `branch`;
-- the agent's `state` (`working`, `idle`, `blocked` or `none`) and its terminal;
-- the newest PR for the branch.
-
-Repair the plan against these facts before applying any transition:
+At the start of each watch cycle, Continue and Report back, run
+`<skill-dir>/scripts/status.sh <project-id> <plan-file>`. It gives a JSON line per planned or
+group-tagged workspace: `group`, `inPlan`, `missing` (planned, not in Paradev), `branch`, agent
+`state` (`working`, `idle`, `blocked`, `none`), terminal, newest PR.
+Repair the plan before applying any transition:
 
 | Found | Do |
 | --- | --- |
-| Plan item started, but its workspace is `missing` | If its branch has a PR, keep following the PR: open means `in-review`, merged means `done`, with the note "workspace gone". If there's no PR, set it `blocked`, reason "workspace missing". |
-| Workspace's branch differs from the plan | Store the current branch in the plan and note the rename. PR lookups follow the current branch. |
-| Plan item `in-progress` with no workspace ID (a crash between writing the plan and creating the workspace) | Search for its branch with `superset workspaces list --local --project <id> --search <branch> --json`. If a workspace is found, record it. If not, set the item back to `queued`. |
-| Tagged workspace that isn't in the plan | Not part of this run, so ignore it; it may be the user's own work. The exception is when its branch matches a plan item that has no workspace: then adopt it. |
-| Tag is `Blocked` or `Done`, but the plan says otherwise | Plan-first ordering rules out an interrupted update, so the user moved it. Accept it: update the item's state (for `Blocked`, reason "moved by user"). |
-| Any other mismatch between tag and item state | Re-apply the group for the item's state. |
+| Started, workspace `missing` | Follow its PR (open `in-review`, merged `done`), note "workspace gone"; no PR: `blocked`, "workspace missing". |
+| Branch differs from plan | Store it, note the rename; PR lookups follow it. |
+| `in-progress`, no workspace ID (crash after plan write) | `superset workspaces list --local --project <id> --search <branch> --json`: record a found workspace, else `queued`. |
+| Tagged, not in plan | Ignore (maybe the user's) unless its branch matches a workspace-less item: adopt. |
+| Tag `Blocked`/`Done`, plan disagrees | User moved it (plan-first excludes interruption): accept; `Blocked` reason "moved by user". |
+| Other tag/state mismatch | Re-apply the state's group. |
 
 ## Watch and move
 
-Run `<skill-dir>/scripts/wait-change.sh <project-id> <plan-file>`. It checks once a minute, so a
-change is noticed within about a minute. It exits when any of these changes: a worker's agent
-state, a group tag, a workspace disappearing, or a PR appearing, merging or closing. Otherwise
-it exits after 20 minutes. If your harness can run a command in the background and tell you
-when it ends, do that, so you don't spend turns polling. Otherwise run it in the foreground
-with a short timeout (`wait-change.sh <project-id> <plan-file> 120`).
+`<skill-dir>/scripts/wait-change.sh <project-id> <plan-file>` polls each minute; exits when an
+agent state, group tag or PR (appears, merges, closes) changes or a workspace vanishes, else
+after 20 minutes. Background it if the harness notifies on exit, else foreground with a short
+timeout (`wait-change.sh <project-id> <plan-file> 120`). On exit: `plan.sh heartbeat` (stop on
+exit 3), [reconcile](#reconcile), apply transitions, dispatch, print the
+[status table](#status-table) if changed, restart unless finished.
 
-Each time it exits:
-
-1. Run `plan.sh heartbeat` (stop if it exits 3), then [reconcile](#reconcile).
-2. Apply the transitions below: for each change, write the plan first, then move the tag.
-3. Dispatch any item that has become ready.
-4. If anything changed, print the [status table](#status-table).
-5. Start the waiter again, unless the run is finished.
+Read: `superset terminals read --local --workspace <id> --terminal <tid>`. Send an answer or
+message: `superset terminals send --local --workspace <id> --terminal <tid> --text "<answer>"`.
 
 | Seen | Do |
 | --- | --- |
-| `in-progress`, and the branch has a PR | Set `in-review` at once. Opening the PR is the worker's goal, so don't wait for CI or reviews. Read the screen for the worker's `ORCHESTRATOR_WORKER_DONE` block, store its `checked:` line in the item's `checked`, and show it under the status table. Workers often open the PR before printing the block, so if it isn't there yet, read it again once the agent is `idle`. |
-| `in-review`, agent `working` | The user typed feedback into the worker's chat. Set `feedback`. These don't count toward the parallel limit. |
-| `feedback`, reason "follow-up sent", agent `working` | The worker picked up the follow-up. Clear the reason. |
-| `feedback`, agent `idle` | Set back to `in-review`, unless the reason is still "follow-up sent": then the worker hasn't started yet, so wait. |
-| Agent `blocked` (Paradev's "needs input") | Read the screen with `superset terminals read --local --workspace <id> --terminal <tid>`. Show the user the exact question and send a desktop notification. The user answers in the worker's chat. If they answer in yours instead, pass it on with `superset terminals send --local --workspace <id> --terminal <tid> --text "<answer>"`. Never answer a permission prompt, or decide anything about scope or the product, on the user's behalf. |
-| `in-progress`, agent `idle`, no PR | Read the screen. If the worker printed `ORCHESTRATOR_WORKER_BLOCKED`, or it already had one follow-up, set `blocked` with its reason, free the slot, and tell the user. Otherwise send one follow-up asking it to finish and open the PR. |
-| PR `MERGED` | Set `done`. Dependents that haven't started can now branch from `main`. Send any follow-up waiting on this item (see below). |
-| PR `CLOSED` without merging | Set `blocked`, reason "PR closed unmerged", and tell the user. |
+| `in-progress`, PR exists | `in-review` now (not waiting for CI/reviews). Save the `ORCHESTRATOR_WORKER_DONE` block's `checked:` line to `checked`; not printed yet: re-read once `idle`. |
+| `in-review`, agent `working` | User is giving feedback: `feedback` (not counted toward the limit). |
+| `feedback`, reason "follow-up sent", agent `working` | Picked up: clear the reason. |
+| `feedback`, agent `idle` | `in-review`, unless reason is still "follow-up sent" (not started): wait. |
+| Agent `blocked` (Paradev's "needs input") | Read the screen; show the exact question; desktop-notify. User answers in the worker's chat (relay with send if in yours). Never answer permission prompts or decide scope/product for them. |
+| `in-progress`, agent `idle`, no PR | Read the screen first. Background work running (e.g. its code-review subagents): don't nudge or count it; keep watching. `ORCHESTRATOR_WORKER_BLOCKED` printed or one follow-up already sent: `blocked` with its reason, free the slot, tell the user. Else one follow-up: finish and open the PR. |
+| PR `MERGED` | `done`; unstarted dependents base on `main`; send follow-ups waiting on it. |
+| PR `CLOSED` unmerged | `blocked`, "PR closed unmerged"; tell the user. |
 
-**When a dependency fails** (it becomes `blocked`, `skipped`, or its PR closes unmerged):
-
-- Its queued dependents become `waiting`, with the reason "waiting on <ID>: <its reason>". Don't
-  start them, re-plan them, or drop the dependency on your own.
-- Dependents that already started (stacked on its branch) keep running. Add the note "built on
-  <ID>, which is <state>", because the user has to decide whether that work still stands.
-- Tell the user once. They can unblock the dependency, tell you to drop it ("start #345
-  anyway"), or skip the dependents. Act on that in Continue, or right away if you're still
-  running.
-- If the dependency recovers (it becomes `in-review` or `done` again), its `waiting`
-  dependents go back to `queued`.
+**Dependency fails** (`blocked`, `skipped`, PR closed unmerged): queued dependents `waiting`,
+"waiting on <ID>: <its reason>"; never start them, re-plan them or drop the dependency yourself.
+Started (stacked) ones run on, noted "built on <ID>, which is <state>" for the user to judge. Tell
+the user once; they unblock it, tell you to drop it ("start #345 anyway"), or skip dependents; act
+in Continue, or now if running. Recovered (`in-review`/`done`): `waiting` dependents back to
+`queued`.
 
 ### Follow-ups after a merge
 
-An item can be `in-review` and still owe work once another item merges, for example "rebase
-onto main and redo the config change once #341 lands". When that comes up (the user says so,
-or the worker's summary says so), record it in the item as
-`followUp: {"after": "<ID>", "message": "<what the worker must do>"}`.
+If the user or a worker's summary says an `in-review` item owes work after a merge ("rebase
+onto main and redo the config change once #341 lands"), record
+`followUp: {"after": "<ID>", "message": "<what the worker must do>"}`. When `<ID>` merges: plan
+`feedback`, reason "follow-up sent", `followUp` cleared; tag `In Progress`; send the message. The
+reason keeps it from `in-review` while still `idle`; once worked and `idle` again it returns
+like any `feedback`. If `<ID>` fails, keep `followUp`, tell the user.
 
-When item `<ID>` merges:
+From `In Review` the user owns the PR (CI, reviews, worker chat); don't read its comments or
+checks. Nobody here approves or merges. Never archive, delete or close a
+workspace, terminal or worktree; after creation only move its tag.
 
-1. Write the plan first: set the waiting item to `feedback`, reason "follow-up sent", and clear
-   its `followUp`.
-2. Move its tag to `In Progress`.
-3. Send the message to its worker with
-   `superset terminals send --local --workspace <id> --terminal <tid> --text "<message>"`.
+### Run finished
 
-The reason keeps the next reconcile from moving it straight back to `in-review` while its agent
-is still `idle`. Once the agent has worked on the message and is `idle` again, it returns to
-`in-review` as any `feedback` item does. If `<ID>` fails instead (`blocked`, `skipped`, or its
-PR closes unmerged), keep the `followUp` and tell the user.
-
-After the move to `In Review`, the user owns the PR: they read CI and review feedback
-themselves and reply in the worker's chat. Don't read PR comments or checks. Workers open PRs;
-nobody in this run approves or merges them.
-
-Never archive, delete or close a workspace, terminal or worktree. After creating a workspace,
-moving its tag is the only change you make to it.
-
-### When the run is finished
-
-The run is finished when, after reconciling, no item is `queued` or `in-progress`. Everything
-is then `in-review`, `feedback`, `done`, `blocked`, `waiting` or `skipped`. At that point:
-
-1. Print the final status table.
-2. Send `superset notifications show "Orchestrator finished" --body "<k> in review, <b> blocked" --sound`.
-3. Stop the waiter.
-
-Keep `status` `active` while anything is `in-review`, `feedback`, `blocked` or `waiting`: merges
-and unblocks still come in, and Report back or Continue picks them up. Set it to `finished`
-(through `plan.sh write`) only when every item is `done` or `skipped`.
+Once reconciled with nothing `queued`/`in-progress`: final table,
+`superset notifications show "Orchestrator finished" --body "<k> in review, <b> blocked" --sound`,
+stop the waiter. `status` stays `active` while any item is `in-review`, `feedback`, `blocked` or
+`waiting`; `finished` (via `plan.sh write`) once all are `done` or `skipped`.
 
 ## Continue
 
-1. `plan.sh claim` (with `--takeover` if it exits 4).
-2. Reconcile.
-3. Apply the transitions, act on any decision the user gave about `waiting` items, and dispatch
-   ready items.
-4. Watch, as in a Run.
+`plan.sh claim` (`--takeover` on exit 4), reconcile, apply transitions and the user's decisions
+on `waiting` items, dispatch, watch.
 
 ## Report back
 
-Report back never starts, messages, or nudges a worker.
-
-1. Load the plan file. If there is none, report on what `status.sh <project-id>` finds.
-2. Reconcile and work out the transitions.
-3. Persist them only if no live orchestrator owns the run. Check with `plan.sh check`, which
-   changes nothing:
-   - `mine` or `finished`: you may write.
-   - `stale`: take over with `plan.sh claim --takeover` and say so in one line.
-
-   Then write the plan and move the tags. If it prints `other`, a live orchestrator owns the
-   run: show the reconciled table without writing, and say who owns the run (`owner` in the
-   plan).
-4. Print the status table, plus a line or two only about what needs the user. If items are
-   ready to start, list them and add: "say 'orchestrator continue' to start them".
+Never starts, messages or nudges workers. Load the plan (none: use `status.sh <project-id>`),
+reconcile, derive transitions. `plan.sh check` (read-only): `mine`/`finished`: write the plan
+and move the tags; `stale`: `plan.sh claim --takeover` (say so in one line), then the same;
+`other`: show the reconciled table without writing, naming the `owner`. Print the table plus a
+line or two only on what needs the user; list ready items with
+"say 'orchestrator continue' to start them".
 
 ## Status table
 
-Keep it this small. One row per item in the run, in plan order:
+One row per run item, plan order:
 
 ```markdown
 | Item | Title | Group | Agent | PR |
@@ -453,10 +311,8 @@ Keep it this small. One row per item in the run, in plan order:
 | #346 | Backup retention | Waiting (#342 blocked) | — | — |
 ```
 
-`Agent` is `running` (state `working`), `waiting for input` (Paradev state `blocked`, or the
-agent asked a question), `done` (`idle` with its part finished), or `—` when no worker exists.
-`Group` is the sidebar group, `Queued (after <ID>)`, `Waiting (<reason>)`, or `Skipped`. Under
-the table, add only what needs the user: a worker's question, a `Blocked` reason, a dependency
-decision, a closed PR, or a missing workspace. When an item has just moved to `In Review`, also
-add its `checked` line, for example "#340 checked: ran the CI workflow on a fork; Pester cache
-hit on the second run".
+`Agent`: `running` (`working`), `waiting for input` (Paradev `blocked`, or it asked a question),
+`done` (`idle`, part finished), `—` (no worker). `Group`: sidebar group, `Queued (after <ID>)`,
+`Waiting (<reason>)`, `Skipped`. Below it only: worker questions, `Blocked` reasons, dependency
+decisions, closed PRs, missing workspaces, a just-in-review item's `checked`
+("#340 checked: ran the CI workflow on a fork; Pester cache hit on the second run").
