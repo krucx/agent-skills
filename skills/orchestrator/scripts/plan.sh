@@ -45,10 +45,10 @@ put() {
 
 owner_alive() {
   local terminal=$1
+  [[ "$terminal" != "unknown" ]] || return 1
   [[ -n "$cli" ]] || { echo "Paradev CLI not found: install superset, paradev or pdev" >&2; exit 1; }
-  [[ "$terminal" != "unknown" ]] &&
-    "$cli" snapshot --json | jq -e --arg t "$terminal" \
-      '[.workspaces[].terminals[] | select(.id == $t and .agent != null)] | length > 0' >/dev/null
+  "$cli" snapshot --json | jq -e --arg t "$terminal" \
+    '[.workspaces[].terminals[] | select(.id == $t and .agent != null)] | length > 0' >/dev/null
 }
 
 stale() {
