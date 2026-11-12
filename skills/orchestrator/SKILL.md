@@ -235,15 +235,17 @@ Repair the plan before applying any transition:
 
 ## Watch and move
 
-`<skill-dir>/scripts/wait-change.sh <project-id> <plan-file>` polls each minute; exits when an
-agent state, group tag or PR (appears, merges, closes) changes or a workspace vanishes, else
-after 20 minutes. Background it if the harness notifies on exit, else foreground with a short
-timeout (`wait-change.sh <project-id> <plan-file> 120`). On exit: `plan.sh heartbeat` (stop on
-exit 3), [reconcile](#reconcile), apply transitions, dispatch, print the
-[status table](#status-table) if changed, restart unless finished.
+`<skill-dir>/scripts/wait-change.sh <project-id> <plan-file>` polls each minute; exits when a
+plan (or adoptable) workspace's agent state, group tag or PR (appears, merges, closes) changes
+or it vanishes, else after 20 minutes. Background it if the harness notifies on exit, else
+foreground with a short timeout (`wait-change.sh <project-id> <plan-file> 120`). On exit:
+`plan.sh heartbeat` (stop on exit 3), [reconcile](#reconcile), apply transitions, dispatch, print
+the [status table](#status-table) if changed, restart unless finished.
 
 Read: `superset terminals read --local --workspace <id> --terminal <tid>`. Send an answer or
 message: `superset terminals send --local --workspace <id> --terminal <tid> --text "<answer>"`.
+`idle` is not done while background work (e.g. code-review subagents) runs: before any `idle`
+row, read the screen; while it runs, skip the row (no transition, no follow-up, not counted).
 
 | Seen | Do |
 | --- | --- |
@@ -252,7 +254,7 @@ message: `superset terminals send --local --workspace <id> --terminal <tid> --te
 | `feedback`, reason "follow-up sent", agent `working` | Picked up: clear the reason. |
 | `feedback`, agent `idle` | `in-review`, unless reason is still "follow-up sent" (not started): wait. |
 | Agent `blocked` (Paradev's "needs input") | Read the screen; show the exact question; desktop-notify. User answers in the worker's chat (relay with send if in yours). Never answer permission prompts or decide scope/product for them. |
-| `in-progress`, agent `idle`, no PR | Read the screen first. Background work running (e.g. its code-review subagents): don't nudge or count it; keep watching. `ORCHESTRATOR_WORKER_BLOCKED` printed or one follow-up already sent: `blocked` with its reason, free the slot, tell the user. Else one follow-up: finish and open the PR. |
+| `in-progress`, agent `idle`, no PR | `ORCHESTRATOR_WORKER_BLOCKED` printed or one follow-up already sent: `blocked` with its reason, free the slot, tell the user. Else one follow-up: finish and open the PR. |
 | PR `MERGED` | `done`; unstarted dependents base on `main`; send follow-ups waiting on it. |
 | PR `CLOSED` unmerged | `blocked`, "PR closed unmerged"; tell the user. |
 
