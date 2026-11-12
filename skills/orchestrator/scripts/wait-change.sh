@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Block until something the orchestrator acts on changes, or until the timeout passes:
 # a worker's agent state, a workspace's group tag, a workspace disappearing, or a PR
-# appearing, merging or closing. Checks once a minute. When it exits, act on what changed and
+# appearing, merging or closing. Only plan workspaces count, plus tagged ones whose branch
+# matches a plan item without a workspace (Reconcile adopts those); with no plan, all count.
+# Checks once a minute. When it exits, act on what changed and
 # start it again.
 #
 # Usage: wait-change.sh <project-id> [plan-file] [timeout-seconds]   (default 1200)
@@ -13,9 +15,16 @@ plan=${2:-}
 timeout=${3:-1200}
 here=$(cd "$(dirname "$0")" && pwd)
 
+adopt=null
+if [[ -n "$plan" && -f "$plan" ]]; then
+  adopt=$(jq -c '[.items[] | select(.workspace == null) | .branch | strings]' "$plan")
+fi
+
 signature() {
   "$here/status.sh" "$project" "$plan" |
-    jq -sc 'map({id, group, missing, agent: .agent.state, pr: (.pr.state // null)})'
+    jq -sc --argjson adopt "$adopt" '
+      map(select($adopt == null or .inPlan or (.branch as $b | $adopt | index($b) != null))
+        | {id, group, missing, agent: .agent.state, pr: (.pr.state // null)})'
 }
 
 start=$(signature)
