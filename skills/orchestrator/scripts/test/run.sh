@@ -560,6 +560,74 @@ expect "gate: an item not in-review is not merged" "$(gate)" "no: #30 is not in-
 gate_sandbox "no PR checks; npm test passed"; pr_view OPEN feature/csv MERGEABLE '[]'
 expect "gate: a test run not marked local gets a follow-up" "$(gate)" "followup:"
 
+# --- chains: offering dependency chains and importing an epic's sub-issues --------------------
+chain_item() { # chain_item <id> <title> [dependsOn-json] [integration]
+  jq -nc --arg id "$1" --arg t "$2" --argjson d "${3:-[]}" --arg i "${4:-}" \
+    '{id: $id, title: $t, state: "queued", dependsOn: $d, integration: (if $i == "" then null else $i end)}'
+}
+sandbox
+plan_with "[$(chain_item '#340' 'Cache Pester in CI'), $(chain_item '#341' 'Split backup' '["#340"]'),
+  $(chain_item '#342' 'Add restore' '["#341"]'), $(chain_item '#350' 'Lone item'),
+  $(chain_item '#360' 'Other root'), $(chain_item '#361' 'Other leaf' '["#360"]')]"
+out=$("$scripts/chains.sh" offer "$plan")
+expect "chains: a three-item chain is offered whole" "$out" '"items":["#340","#341","#342"]'
+expect "chains: named after its root" "$out" 'group #340, #341, #342 into feature/340-cache-pester-in-ci?'
+expect "chains: a second chain is offered separately" "$out" '"items":["#360","#361"]'
+expect_not "chains: an independent item is not a chain" "$out" "#350"
+expect "chains: accept makes an integration" "$("$scripts/chains.sh" accept "$plan" '#341')" "added F1 feature/340-cache-pester-in-ci: #340, #341, #342"
+expect "chains: the chain's items join it" "$(jq -c '[.items[] | select(.integration == "F1") | .id]' "$plan")" '["#340","#341","#342"]'
+expect "chains: the integration is based on the default branch" "$(jq -c '.integrations[0] | [.id, .base, .state]' "$plan")" '["F1","main","open"]'
+expect "chains: an accepted chain is not offered again" "$("$scripts/chains.sh" offer "$plan")" '"items":["#360","#361"]'
+expect_not "chains: nor its items" "$("$scripts/chains.sh" offer "$plan")" "#341"
+expect "chains: a declined chain stays as it was" "$(jq -c '[.items[] | select(.id == "#360") | .integration]' "$plan")" '[null]'
+"$scripts/chains.sh" accept "$plan" '#361' >/dev/null
+expect "chains: the next integration gets the next id" "$(jq -r '.integrations[1].id' "$plan")" "F2"
+expect "chains: accept refuses a lone item" "$("$scripts/chains.sh" accept "$plan" '#350' 2>&1)" "#350 is in no offered chain"
+
+# a diamond is one chain
+sandbox
+plan_with "[$(chain_item '#1' 'Root'), $(chain_item '#2' 'Left' '["#1"]'), $(chain_item '#3' 'Right' '["#1"]'), $(chain_item '#4' 'Join' '["#2","#3"]')]"
+expect "chains: a diamond is one chain" "$("$scripts/chains.sh" offer "$plan" | wc -l | tr -d ' ')" "1"
+plan_with "[$(chain_item '#1' 'Solo' '["#99"]')]"
+expect "chains: an outside dependency is no chain" "$("$scripts/chains.sh" offer "$plan")" ""
+
+# a shared feature branch takes every item, chains included, and nothing is left to offer
+sandbox
+plan_with "[$(chain_item '#340' 'Cache Pester'), $(chain_item '#341' 'Split backup' '["#340"]'), $(chain_item '#350' 'Lone item')]"
+expect "chains: share adds one feature branch" "$("$scripts/chains.sh" share "$plan" 'CSV export!')" "added F1 feature/csv-export"
+expect "chains: share puts every item on it" "$(jq -c '[.items[].integration]' "$plan")" '["F1","F1","F1"]'
+expect "chains: nothing to offer once shared" "$("$scripts/chains.sh" offer "$plan")" ""
+
+# epic: sub-issues become the items of one integration named after the epic
+sandbox
+echo '{"number":400,"title":"CSV Export","url":"https://github.com/acme/app/issues/400"}' >"$FIX/epic.json"
+echo '[{"number":401,"title":"Add button","state":"open","labels":[{"name":"enhancement"}]},
+ {"number":402,"title":"Old","state":"closed","labels":[]},
+ {"number":403,"title":"Vague","state":"open","labels":[{"name":"needs-info"}]},
+ {"number":404,"title":"Planned","state":"open","labels":[]},
+ {"number":405,"title":"Server","state":"open","labels":[]},
+ {"number":406,"title":"A PR","state":"open","labels":[],"pull_request":{}}]' >"$FIX/sub-issues.json"
+plan_with "[$(chain_item '#404' 'Planned')]"
+out=$("$scripts/epic.sh" fetch 400 "$plan")
+expect "epic: fetch lists the open sub-issues" "$(jq -c '[.items[].id]' <<<"$out")" '["#401","#405"]'
+expect "epic: fetch drops a closed one" "$out" '{"id":"#402","reason":"closed"}'
+expect "epic: fetch drops needs-info" "$out" '{"id":"#403","reason":"needs-info"}'
+expect "epic: fetch drops an already planned one" "$out" '{"id":"#404","reason":"already planned"}'
+expect "epic: fetch drops a pull request" "$out" '{"id":"#406","reason":"pull request"}'
+out=$("$scripts/epic.sh" import "$plan" 400)
+expect "epic: import names the integration after the epic" "$out" "imported 2 of #400 into feature/400-csv-export"
+expect "epic: the integration carries the epic" "$(jq -c '.integrations[0] | [.branch, .epic.url, .state]' "$plan")" '["feature/400-csv-export","https://github.com/acme/app/issues/400","open"]'
+expect "epic: the sub-issues are queued items on it" "$(jq -c '[.items[] | select(.integration == "F1") | [.id, .state]]' "$plan")" '[["#401","queued"],["#405","queued"]]'
+expect "epic: the existing item is untouched" "$(jq -c '[.items[] | select(.id == "#404") | .integration]' "$plan")" '[null]'
+
+# the final PR links the epic
+dispatch_sandbox
+integ_items done done
+jq '.integrations[0].epic = {id: "#400", title: "CSV", url: "https://github.com/acme/app/issues/400"}' "$plan" >"$plan.t" && mv "$plan.t" "$plan"
+"$scripts/integrate.sh" add "$plan" F1 >/dev/null
+"$scripts/dispatch.sh" proj "$plan" F1-integrate >/dev/null 2>&1
+expect "epic: the integrate worker links the epic" "$(cat "$FIX/create.args")" "and the epic https://github.com/acme/app/issues/400"
+
 # --- rulesets of the integration branch -------------------------------------------------------
 sandbox
 echo '[]' >"$FIX/rules.json"

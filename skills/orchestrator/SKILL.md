@@ -1,10 +1,10 @@
 ---
 name: orchestrator
-description: Master agent that plans a batch of tracker issues (GitHub, Linear, Jira) or free-text work split into tasks, and drives each to its own pull request through Paradev (formerly Superset), one worktree workspace and implement-skill worker each, with a saved, resumable plan and workspaces moved between the In Progress, In Review, Done and Blocked sidebar groups as PRs appear and merge. Also "orchestrator report back" (status table), "continue" (resume a run), "close" (end one). Use whenever the user says "orchestrate", "orchestrate these issues", "orchestrate 340 to 345", "orchestrate and work", "be the master agent", or "orchestrator report back" / "status" / "continue" / "close", even without mentioning Paradev. Not for small ad-hoc fan-outs with no tracker, PRs or need to resume (e.g. "run these 3 refactors in parallel and tell me when done"): those belong to `superset:orchestrate`.
+description: Master agent that plans a batch of tracker issues (GitHub, Linear, Jira), a feature or epic ("orchestrate feature #400", sub-issues as one integration branch) or free-text work split into tasks, and drives each to its own pull request through Paradev (formerly Superset), one worktree workspace and implement-skill worker each, with a saved, resumable plan and workspaces moved between the In Progress, In Review, Done and Blocked sidebar groups as PRs appear and merge. Also "orchestrator report back" (status table), "continue" (resume a run), "close" (end one). Use whenever the user says "orchestrate", "orchestrate these issues", "orchestrate 340 to 345", "orchestrate and work", "be the master agent", or "orchestrator report back" / "status" / "continue" / "close", even without mentioning Paradev. Not for small ad-hoc fan-outs with no tracker, PRs or need to resume (e.g. "run these 3 refactors in parallel and tell me when done"): those belong to `superset:orchestrate`.
 compatibility: Needs bash, jq, git, the GitHub CLI (gh, signed in) and the Paradev CLI (superset, paradev or pdev) with this machine's host running. PRs must live on GitHub.
 model: sonnet
 effort: low
-argument-hint: items like "340-343, 345 onwards", "ENG-12 ENG-15", free text, "report back", "continue", or "close"
+argument-hint: items like "340-343, 345 onwards", "ENG-12 ENG-15", "feature #400" (an epic), "feature: <description>", free text, "report back", "continue", or "close"
 ---
 
 # Orchestrator
@@ -72,6 +72,9 @@ Every workspace has exactly one tag (sidebar folder): its group's tag from the p
 
 - Refs, mixable: `340-343` (inclusive), `345 onwards` (open items ≥ 345), `#350`, `ENG-123`,
   `PROJ-7`; or free text ("orchestrate: add CSV export, fix the login redirect, …").
+- `feature #400` / `feature ENG-40` ("orchestrate feature #400"): an **epic**. Its sub-issues are
+  the items, all targeting one [integration branch](#integration-branches) named after the parent
+  (`epic.sh`, below). Not listed in the refs above: the parent itself is never an item.
 - `feature: <description>` ("orchestrate feature: add CSV export"): free text whose tasks all
   target one [integration branch](#integration-branches).
 - Options, per run or subset ("340-343 using /implement, 344-345 using /implement-spec"):
@@ -87,7 +90,13 @@ Steps 1–3 for tracker refs only.
 2. **Reach it** (`gh`, `superset tasks get <KEY> --tracker linear --json`, harness tools), else stop
    and say how to connect (Linear in Paradev, or `superset plugins install linear`). Never install
    or connect anything yourself.
-3. **Fetch** title, body, labels, author. Drop closed items, PRs, items with an open PR or already
+3. **Fetch** title, body, labels, author. Epic: `<skill-dir>/scripts/epic.sh fetch <n> <plan-file>`
+   gives GitHub sub-issues already filtered (closed, PRs, planned, `needs-info`); `epic.sh import
+   <plan-file> <n>` adds the integration (`feature/<n>-<slug>`, `epic` stored on it) and its queued
+   items. Linear/Jira parents: read the children (`superset tasks get <KEY> --tracker linear
+   --json`, harness tools; none reachable: say how to connect, stop) and add the integration by
+   hand with `epic`. Then continue below with dependencies among the children as for any items.
+   Still drop items with an open PR, and name each drop and why. Drop closed items, PRs, items with an open PR or already
    planned; `skipped`: `needs-info`/`needs-triage` label or too vague. Name each and why.
 4. **Free text → tasks** `T1`, `T2`, … (one reviewable PR each; title, dependencies). `ask`: the
    slice of the user's request it covers, **verbatim** (never reworded or widened). `notes`: your
@@ -98,15 +107,21 @@ Steps 1–3 for tracker refs only.
 5. **Dependencies**: explicit ("blocked by", "depends on", "after", parent/child) and conflicts
    (clearly same files, migration, config or schema; smaller first). Outside the run:
    closed-as-completed = met; open or skipped → dependent `waiting`, naming it.
+   **Interface hint**: when a chain's link looks large, suggest in one line splitting out a small
+   "interface/stub" task first, so later links can start in parallel. Only suggest; never split
+   or re-plan without the user's go.
 6. **Waves** ≤ parallel limit: independent first, preferring unblockers.
 7. **Save** (`plan.sh write`); `runId` = start time `YYYYMMDD-HHMM`.
 8. **Show** a short table (item, title, wave, depends on, **target**, skill, agent) and dispatch at once; ask
    instead on a dependency cycle or if two items might be one PR. An
    [auto-only](#worker-agents-and-auto-approval) harness without an `autoOnly` answer: hold its
-   items, ask below the table, dispatch on the reply. A run with an integration branch waits for
-   the go instead: it asks **once** where the independent items (no dependencies) go, "straight
-   to `main`" or "into `feature/<slug>`" (the latter puts chains on it too, as one integration).
-   Per-item moves ("#344 straight to main") are applied and the table shown again.
+   items, ask below the table, dispatch on the reply. A run with an integration branch, or with
+   a [dependency chain](#dependency-chains) (two or more connected items), waits for the go
+   instead. The go message asks **once**, everything at once, never later: where the independent
+   items (no dependencies) go, "straight to `main`" or "into `feature/<slug>`" (the latter puts
+   chains on it too, as one integration, so no chain is offered), and, only if they go to `main`,
+   each chain as its own integration. Per-item moves ("#344 straight to main") are applied and
+   the table shown again.
 
 ## Integration branches
 
@@ -116,11 +131,25 @@ integration branch ([below](#merging-into-an-integration-branch)). Stacking, squ
 rebases all apply against the target. **Never nested**: an integration's `base` is the default
 branch. Request "orchestrate feature: <description>": split into tasks as for free text, add one
 `feature/<slug>` integration (`id` `F1`, `title`, `base`, `pr` null, `state` `open`) and set every
-task's `integration` to it. Otherwise integrations arise from the go message below: independent
-items to the feature branch means one `feature/<runId-slug>` integration for the whole run,
-chains included (dependents wait for their parent's merge into it); independent items to `main`
-means each chain may get its own integration. The user may move single items ("#344 straight to
+task's `integration` to it. An epic run ("orchestrate feature #400") adds one integration named after the parent
+(`feature/400-<slug>`, `epic` set; the final PR links it). Otherwise integrations arise from the go message
+([chains](#dependency-chains)): independent items to the feature branch means one
+`feature/<runId-slug>` integration for the whole run, chains included, who merge link by link
+into it; independent items to `main` means each chain may get its own integration. The user may move single items ("#344 straight to
 main": `integration` null; "#344 into the feature branch").
+
+### Dependency chains
+
+Any run, after dependencies are worked out: `<skill-dir>/scripts/chains.sh offer <plan-file>`
+prints each connected group of two or more dependent items (#340 ← #341 ← #342) with its branch
+and question: "group #340, #341, #342 into `feature/340-<slug>`?". Show them in the go message and
+apply the reply: yes → `chains.sh accept <plan-file> <ID>` (one member per accepted chain); on
+no the chain runs as today, stacked or waiting for merges into `main`. An accepted chain merges link
+by link into its branch ([merging](#merging-into-an-integration-branch)), so a dependent no longer
+waits for human review of its parent. Items already on an integration (epic, `feature:`) are never
+offered. If the independent items go into a feature branch, offer no chain:
+`chains.sh share <plan-file> <slug>` puts the whole run on one `feature/<slug>`, chains included,
+never nested. Items in the plan table show their integration as the **target**.
 
 ## Worker agents and auto-approval
 
@@ -257,7 +286,7 @@ check <plan-file>` gives each open integration a verdict:
   `<F>`), dispatched like any item (it waits for a free slot). Its worker starts on the
   integration branch, merges `origin/<default>`, resolves conflicts, runs the full checks (CI, else
   local tests) and opens `feature/<slug>` → default branch with every sub-PR listed and the
-  epic/issues linked. You still never implement.
+  epic (the integration's `epic`) or issues linked. You still never implement.
 - `held` (an item `blocked`, `waiting` or `skipped`): tell the user once, naming it. They unblock it or
   drop it ("ship F1 without T3"): set it `skipped` with `dropped: true`, which releases it. A skipped item
   that was not dropped keeps holding.

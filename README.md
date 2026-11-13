@@ -5,7 +5,7 @@ from Claude Code, Codex, Gemini CLI, Hermes and any other harness that reads `SK
 
 | Skill | What it does |
 | --- | --- |
-| [orchestrator](skills/orchestrator/SKILL.md) | Plans a batch of tracker issues or free-text work into waves and drives each task to its own PR in a parallel Paradev worktree workspace, with a saved, resumable plan and In Progress, In Review, Done and Blocked groups. Small ad-hoc fan-outs with no tracker or PRs belong to `superset:orchestrate`. |
+| [orchestrator](skills/orchestrator/SKILL.md) | Plans a batch of tracker issues, an epic ("orchestrate feature #400") or free-text work into waves and drives each task to its own PR in a parallel Paradev worktree workspace, with a saved, resumable plan and In Progress, In Review, Done and Blocked groups. Small ad-hoc fan-outs with no tracker or PRs belong to `superset:orchestrate`. |
 
 ## Install
 

@@ -148,13 +148,14 @@ others=$(jq -r --arg id "$id" '[.items[] | select(.id != $id) | .id] | join(", "
   [[ -z $task ]] || printf '%s\n' "- $id is a label in this run's plan only, not a tracker ticket; don't fetch it. The task" \
     "  is $task."
   if [[ -n $integrates ]]; then
+    epic=$(jq -r --arg i "$integrates" '[.integrations[]? | select(.id == $i) | .epic.url // empty][0] // empty' "$plan")
     prs=$(jq -r --arg i "$integrates" '.items[] | select(.integration == $i) | "  - \(.id) \(.title)\(if .pr then ": " + .pr else "" end)\(if .state == "skipped" then " (dropped, not included)" else "" end)"' "$plan")
     printf '%s\n' "Integration job: land the feature branch $ibranch on $target with ONE PR; its sub-PRs are already" \
       "merged into it. They are:" "$prs" \
       "- Your branch starts at $ibranch. Merge origin/$target into it (\`git fetch origin && git merge origin/$target\`)," \
       "  resolve conflicts, run the project's tests locally, then \`git push origin HEAD:$ibranch\`." \
       "- Open $ibranch -> $target (\`gh pr create --base $target --head $ibranch\`), its description listing every" \
-      "  sub-PR above and linking the epic or issues they close (\`Closes #n\`). Then run the full CI" \
+      "  sub-PR above and linking the epic or issues they close (\`Closes #n\`)${epic:+, and the epic $epic}. Then run the full CI" \
       "  (the PR's checks; none: the local run counts). Push to $ibranch only for the merge and fixes." \
       "- Main is synced only here: don't merge $target into the feature branch at any other time." \
       "  Do not merge the final PR; the user reviews and merges it." ""

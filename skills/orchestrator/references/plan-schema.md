@@ -21,7 +21,7 @@
   (optional): `"human"` when its rulesets forbid merge commits (the orchestrator then leaves the
   sub-PR merges to humans), `"strict"` once the up-to-date requirement was reported. Item `integration`:
   an integration's `id`, `dropped` (optional, with state `skipped`): the user dropped it so its
-  integration can finish; `integrates`: on the synthetic `<F>-integrate` item `integrate.sh add`
+  integration can finish; `epic` (optional): `{id, title, url}` of the parent issue an epic run imported; the final PR links it; `integrates`: on the synthetic `<F>-integrate` item `integrate.sh add`
   creates (no `integration`; targets the default branch, starts on integration `<F>`'s branch), or `null`/absent for an item targeting the default branch. An item's
   **target** is its integration's `branch`, else the default branch; one run may mix both.
 - `pageId`: the run-summary page, once published; later [summaries](../SKILL.md#run-summary) pass
