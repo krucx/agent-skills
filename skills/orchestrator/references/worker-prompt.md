@@ -22,15 +22,17 @@ After the first line the prompt carries, in this order (exact wording lives in `
   commits on the branch, so the PR conflicts until then);
 - the goal is an open PR: push and `gh pr create` even if the skill stops at a commit; ask a
   human decision plainly and stop;
-- the same obstacle a second time (the same failing command, the same check it can't fix, or the
-  same missing access) means stop, not retry: print `ORCHESTRATOR_WORKER_BLOCKED` with `reason:`
-  naming the obstacle and `needs:` what would clear it;
+- the same obstacle a second time (the same failing command or the same missing access) means
+  stop, not retry: print `ORCHESTRATOR_WORKER_BLOCKED` with `reason:` naming the obstacle and
+  `needs:` what would clear it; once the PR is open, a PR check it can't fix is not an obstacle
+  and goes in `checked:` (a block after the PR exists would land the item in `in-review`);
 - done means the PR's checks have finished and it is mergeable: `gh pr checks <n> --watch
   --fail-fast` (read the exit code and failed check names only), tail `gh run view <run-id>
   --log-failed` for a failure (never green logs), fix, push, watch again; then confirm
   `gh pr view <n> --json mergeable,mergeStateStatus,statusCheckRollup`, merging or rebasing the
   base on a conflict; a check that can't be fixed goes in `checked:` by name;
-- the last message ends with exactly one of:
+- the last message ends with exactly one of these, the marker on a line of its own (`status.sh`
+  ignores a marker mid-sentence, so the prompt's own mentions are not read as reports):
 
 ```text
 ORCHESTRATOR_WORKER_DONE

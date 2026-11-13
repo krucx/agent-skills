@@ -125,9 +125,10 @@ others=$(jq -r --arg id "$id" '[.items[] | select(.id != $id) | .id] | join(", "
   printf '%s\n' "- Your goal is an open pull request. When the work is committed, push the branch and open the" \
     "  PR yourself (\`gh pr create\`), even if your skill stops at a commit. If you need a decision" \
     "  from a human, ask it plainly and stop." \
-    "- If you hit the same obstacle a second time (the same failing command, the same check you" \
-    "  cannot fix, or the same missing access), do not try again: print ORCHESTRATOR_WORKER_BLOCKED" \
-    "  with \`reason:\` naming that obstacle and \`needs:\` naming what would clear it, and stop." \
+    "- If you hit the same obstacle a second time (the same failing command or the same missing" \
+    "  access), do not try again: print ORCHESTRATOR_WORKER_BLOCKED with \`reason:\` naming that" \
+    "  obstacle and \`needs:\` naming what would clear it, and stop. Once the PR is open," \
+    "  a PR check you cannot fix is not an obstacle: it goes in \`checked:\` as below." \
     "- You are done when the PR's checks have finished and it is mergeable, not when it is open." \
     "  Before printing ORCHESTRATOR_WORKER_DONE, run \`gh pr checks <n> --watch --fail-fast\` and read" \
     "  only its exit code and the names of failed checks. For a failed check, tail" \
@@ -136,7 +137,7 @@ others=$(jq -r --arg id "$id" '[.items[] | select(.id != $id) | .id] | join(", "
     "  --json mergeable,mergeStateStatus,statusCheckRollup --jq '{mergeable, mergeStateStatus," \
     "  failing: [.statusCheckRollup[] | select(.conclusion==\"FAILURE\") | .name]}'\`. On a conflict," \
     "  merge or rebase the base and push. A check you cannot fix goes in \`checked:\` by name." \
-    "- Finish your last message with exactly one of:" \
+    "- Finish your last message with exactly one of these, the marker on a line of its own:" \
     "  ORCHESTRATOR_WORKER_DONE" "  item: $id" "  pr: <url>" "  summary: <one line>" \
     "  checked: <what you verified against the task, and the PR's checks in a few words (\"5/5" \
     "    green\"); name only the checks that were red or skipped>" "  or" \
