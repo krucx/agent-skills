@@ -13,10 +13,11 @@ Codex `$<skill> <ID>`; others `Use the <skill> skill to do <ID>.` Then, in order
   names, scratch/data dirs and temp files; no fixed host ports;
 - stacked only: starts from `<branch>` (PR #<m>, unmerged); "Stacked on #<m>; merge that first" in
   the PR description; note the parent tip before the first commit; after #<m> merges,
-  `git fetch origin && git rebase --onto origin/main <that tip> HEAD`, `git push
+  `git fetch origin && git rebase --onto origin/<target> <that tip> HEAD`, `git push
   --force-with-lease`, delete the "merge that first" line (squash-merge leaves the parent's commits,
   so the PR conflicts until then);
-- the goal is an open PR: push and `gh pr create` even if the skill stops at a commit; ask a human
+- the goal is an open PR: push and `gh pr create --base <target>` (the item's integration branch,
+  else the default branch) even if the skill stops at a commit; ask a human
   decision plainly and stop;
 - the same obstacle twice (same failing command or missing access): stop, print `ORCHESTRATOR_WORKER_BLOCKED` with
   `reason:` the obstacle, `needs:` what clears it; once the PR is open, an unfixable PR check is

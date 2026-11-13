@@ -3,7 +3,10 @@
 # workspace with the worker prompt, and record workspace, terminal and branch.
 #
 # Usage (inside the repo): dispatch.sh <project-id> <plan-file> <item-id> [--base <branch>] [--preset <id>]
-#   --base    start branch (default: the repo's default); any other base makes the item stacked
+#   --base    start branch (default: the item's target); any other base makes the item stacked
+#
+# The target is the item's integration branch (plan "integrations", item "integration"), else the
+# repo's default branch. A missing integration branch is created on the remote from its base.
 #   --preset  agent instance or preset id to start (default: the item's "agent")
 #
 # Steps: SKILL.md's Dispatch. The first failing step stops the run; nothing is written before
@@ -51,9 +54,26 @@ run=$(jq -r '.runId' "$plan")
 [[ -n $preset ]] || preset=$agent
 default_base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)
 default_base=${default_base:-main}
+# The target: where the item's PR goes. Integrations never nest, so a base is a default branch.
+target=$default_base integ=$(item '.integration // ""')
+if [[ -n $integ ]]; then
+  target=$(jq -r --arg i "$integ" '[.integrations[]? | select(.id == $i) | .branch][0] // empty' "$plan")
+  [[ -n $target ]] || fail preflight "item $id names integration $integ, not in the plan"
+  ibase=$(jq -r --arg i "$integ" '[.integrations[] | select(.id == $i) | .base][0] // empty' "$plan")
+  ibase=${ibase:-$default_base}
+fi
+base=${base:-$target}
 stacked=''
-[[ -z $base || $base == "$default_base" ]] || stacked=1
-base=${base:-$default_base}
+[[ $base == "$target" ]] || stacked=1
+
+# --- 0. integration branch ------------------------------------------------------------------
+if [[ $target != "$default_base" ]]; then
+  out=$(git ls-remote --heads origin "$target") || fail integration "git ls-remote failed"
+  if [[ -z $out ]]; then
+    git fetch -q origin "$ibase" >"$tmp/err" 2>&1 && git push -q origin "FETCH_HEAD:refs/heads/$target" >>"$tmp/err" 2>&1 ||
+      fail integration "cannot create $target from $ibase: $(cat "$tmp/err")"
+  fi
+fi
 
 # --- 1. branch ------------------------------------------------------------------------------
 lower=$(printf '%s' "$id" | tr 'A-Z' 'a-z')
@@ -125,11 +145,11 @@ others=$(jq -r --arg id "$id" '[.items[] | select(.id != $id) | .id] | join(", "
     m=$(gh pr list --head "$base" --state all --json number --jq '.[0].number // empty' 2>/dev/null || true)
     printf '%s\n' "- Stacked: this branch starts from $base (PR #${m:-?}, unmerged). Put \"Stacked on #${m:-?}; merge" \
       "  that first\" in the PR description. Note the parent tip now (\`git rev-parse HEAD\`, before your" \
-      "  first commit). When #${m:-?} merges: \`git fetch origin && git rebase --onto origin/main <that tip>" \
+      "  first commit). When #${m:-?} merges: \`git fetch origin && git rebase --onto origin/$target <that tip>" \
       "  HEAD\`, \`git push --force-with-lease\`, and delete the \"merge that first\" line (a squash-merge" \
       "  leaves the parent's commits on your branch, so the PR conflicts until then)."
   fi
-  printf '%s\n' "- Your goal is an open PR: once committed, push and \`gh pr create\` yourself, even if your skill" \
+  printf '%s\n' "- Your goal is an open PR: once committed, push and \`gh pr create --base $target\` yourself, even if your skill" \
     "  stops at a commit. Need a human decision? Ask it plainly and stop." \
     "- If you hit the same obstacle a second time (same failing command or missing access), don't" \
     "  retry: print ORCHESTRATOR_WORKER_BLOCKED, \`reason:\` the obstacle, \`needs:\` what would clear" \
