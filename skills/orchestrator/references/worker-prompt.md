@@ -16,6 +16,10 @@ Codex `$<skill> <ID>`; others `Use the <skill> skill to do <ID>.` Then, in order
   `git fetch origin && git rebase --onto origin/<target> <that tip> HEAD`, `git push
   --force-with-lease`, delete the "merge that first" line (squash-merge leaves the parent's commits,
   so the PR conflicts until then);
+- `<F>-integrate` only: the sub-PR list, merging `origin/<default>` into the branch (which starts at
+  the feature branch), conflicts, the full checks, `git push origin HEAD:feature/<slug>`, then
+  `gh pr create --base <default> --head feature/<slug>` listing every sub-PR and linking the issues
+  they close; never merged by the worker or orchestrator;
 - the goal is an open PR: push and `gh pr create --base <target>` (the item's integration branch,
   else the default branch) even if the skill stops at a commit; ask a human
   decision plainly and stop;
