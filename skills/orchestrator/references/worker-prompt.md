@@ -56,7 +56,8 @@ needs: <the decision or access required>
 ```
 
 The wait block (not a final report; `status.sh` shows it as marker `waiting` with `waitingOn` and
-`resumesWhen`, and the orchestrator skips the worker while it is the latest block):
+`resumesWhen`, and the orchestrator skips the worker while it is the latest block; the same wait
+still latest after 30 minutes is `stale` and gets a screen check instead):
 
 ```text
 ORCHESTRATOR_WORKER_WAITING

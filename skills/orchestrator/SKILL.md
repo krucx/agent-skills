@@ -234,7 +234,9 @@ Read (worker block from status.sh first): `superset terminals read --local --wor
 (`ORCHESTRATOR_WORKER_WAITING`: its own background work, e.g. code-review subagents, or something
 external that clears on its own) is busy, whatever the table below says for `idle`: skip it (no
 transition, no follow-up, not counted as done), without reading the screen. A later DONE or BLOCKED
-block replaces the wait. Waiting is not blocked: only a BLOCKED block (or a row below) needs you or
+block replaces the wait. A **stale** wait (`stale`: the same wait still latest after 30 minutes)
+gets a screen check each cycle: still running, skip it; nothing running, treat it as no declared
+wait (the rows below apply). Waiting is not blocked: only a BLOCKED block (or a row below) needs you or
 the user. Fallback, only for an `idle` row with no declared wait (no worker block, or in `feedback`
 only an earlier round's): read the screen first; background work still running there is skipped
 the same way.

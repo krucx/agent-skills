@@ -21,7 +21,9 @@
 #   worker                 the last ORCHESTRATOR_WORKER_DONE/BLOCKED/WAITING block on screen as
 #                          {marker, item, pr, summary, checked, reason, needs, waitingOn,
 #                          resumesWhen}, or null; marker "waiting" is a declared wait (busy, not
-#                          done), and a later DONE or BLOCKED block replaces it
+#                          done), and a later DONE or BLOCKED block replaces it; the same wait
+#                          still latest after WAIT_MINUTES (default 30) also has "stale": true and
+#                          "staleMinutes", so the orchestrator checks the screen instead of skipping
 #   pr                     newest PR for the branch {number,url,state,isDraft}, or null; an open
 #                          PR GitHub reports CONFLICTING also has "conflicting": true and
 #                          "base" (its base branch), from one filtered `gh pr list` for all PRs
@@ -38,6 +40,7 @@ project=$1
 plan=${2:-}
 here=$(cd "$(dirname "$0")" && pwd)
 STALL_MINUTES=${STALL_MINUTES:-15}
+WAIT_MINUTES=${WAIT_MINUTES:-30}
 # Last-resort agent messages that mean it can't go on; matched ignoring case.
 FATAL='usage limit|rate[ -]limit(ed| reached| exceeded)|quota (exceeded|exhausted|reached)|exceeded your (current )?quota|insufficient_quota|context (window|length) (exceeded|exhausted|is full)|context_length_exceeded|out of context|(auth(entication)?|session|token|credentials?|login) (has )?expired|please (log|sign) ?in again|not logged in|invalid api key'
 
@@ -160,12 +163,21 @@ out=$(while IFS= read -r row; do
     banner=''
     [[ $worker == null || -z $worker || $worker == *'"marker":"waiting"'* ]] && banner=$(printf '%s\n' "$text" | tail -n 20 |
       grep -iE "$FATAL" | tail -n 1 | sed -E 's/^[[:space:]]+|[[:space:]]+$//g' | cut -c1-200 || true)
+    # A declared wait is timed by its own text, not the screen, which an idle agent may redraw.
+    wkey=$(printf '%s' "$worker" | cksum | tr -d ' \t')
     row=$(jq -c --arg t "$t" --arg hash "$hash" --arg banner "$banner" --argjson worker "${worker:-null}" \
-      --argjson seen "$seen" --argjson now "$now" --argjson stall $((STALL_MINUTES * 60)) '
+      --argjson seen "$seen" --argjson now "$now" --argjson stall $((STALL_MINUTES * 60)) \
+      --arg wkey "$wkey" --argjson waitlimit $((WAIT_MINUTES * 60)) '
       ($seen[$t] // {}) as $old
       | (if $old.hash == $hash and $old.state == "working" then $old.since else $now end) as $since
       | .worker = $worker
       | .screen = {hash: $hash, since: $since, state: .agent.state}
+      | if .worker.marker == "waiting" then
+          (if $old.wait.key == $wkey then $old.wait.since else $now end) as $ws
+          | .screen.wait = {key: $wkey, since: $ws}
+          | if $now - $ws >= $waitlimit
+            then .worker += {stale: true, staleMinutes: (($now - $ws) / 60 | floor)} else . end
+        else . end
       | if $banner != "" then .agent.state = "blocked" | .agent.reason = $banner
         elif .agent.state == "working" and $now - $since >= $stall then
           .agent.state = "stalled"
@@ -193,6 +205,7 @@ if [[ -n $compact ]]; then
          + (if .worker then ["worker \(.worker.marker)"
               + (if .worker.waitingOn then ", on: \(.worker.waitingOn)" else "" end)
               + (if .worker.resumesWhen then ", until: \(.worker.resumesWhen)" else "" end)
+              + (if .worker.stale then ", stale wait (\(.worker.staleMinutes) minutes)" else "" end)
               + (if .worker.checked then ", checked: \(.worker.checked)" else "" end)
               + (if .worker.reason then ", reason: \(.worker.reason)" else "" end)] else [] end)
          | join(" | ")' <<<"$out"

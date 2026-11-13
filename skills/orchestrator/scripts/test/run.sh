@@ -153,6 +153,21 @@ printf '%s\n' "ORCHESTRATOR_WORKER_WAITING" "item: #14" "waiting-on: CI" "resume
   "  ■ You've hit your usage limit. Try again in 3 hours." "" >"$FIX/screens/t14"
 expect "waiting: a fatal banner still blocks a waiting worker" "$(status)" '"state":"blocked"'
 
+# --- worker block: a wait declared WAIT_MINUTES ago goes stale --------------------------------
+sandbox
+plan_with "[$(item '#15' in-progress w15 t15)]"
+ws w15 b-#15 "In Progress"; snapshot w15 t15 idle
+printf '%s\n' "ORCHESTRATOR_WORKER_WAITING" "item: #15" "waiting-on: CI" "resumes-when: checks finish" "" >"$FIX/screens/t15"
+expect_not "stale wait: fresh wait is not stale" "$(status)" '"stale"'
+screens="$HOME/.agents/orchestrator/screens/20261112-1200.json"
+jq --argjson old $(($(date +%s) - 31 * 60)) '.t15.wait.since = $old' "$screens" >"$screens.tmp" && mv "$screens.tmp" "$screens"
+printf '%s\n' "ORCHESTRATOR_WORKER_WAITING" "item: #15" "waiting-on: CI" "resumes-when: checks finish" "" "✻ Idle" >"$FIX/screens/t15"
+out=$(status)
+expect "stale wait: the same wait 31 minutes on is stale" "$out" '"stale":true'
+expect "stale wait: compact says to check the screen" "$(status --compact)" "stale wait (31 minutes)"
+printf '%s\n' "ORCHESTRATOR_WORKER_WAITING" "item: #15" "waiting-on: the review subagents" "resumes-when: they report" "" >"$FIX/screens/t15"
+expect_not "stale wait: a new wait starts the clock again" "$(status)" '"stale"'
+
 # --- worker replaced: terminal differs from the plan's ---------------------------------------
 sandbox
 plan_with "[$(item '#4' in-progress w4 t-old)]"
