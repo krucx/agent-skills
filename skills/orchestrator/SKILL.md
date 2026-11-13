@@ -240,8 +240,8 @@ next cycle); `followup:` (no PR checks and `checked:` shows no passing local tes
 follow-up asking for a local run, as an acceptance gap, `acceptance` = the gap; never a second);
 `no:` (leave it for humans). Run it each cycle for `in-review` items with an integration.
 
-Once per integration, before its first merge: `merge.sh rules <branch>`. `no-merge-commit`: say
-so, set the integration's `mergeNote` `"human"` and leave its merges to humans. `strict` (branches
+Once per integration, before its first merge: `merge.sh rules <branch>`. `unknown`: treat as
+`no-merge-commit` until the user says otherwise. `no-merge-commit`: say so, set the integration's `mergeNote` `"human"` (`merge.sh check` then answers `no:`). `strict` (branches
 must be up to date): say so once, suggest turning it off for `feature/*` (every sibling's merge
 would otherwise update and rerun CI on each open PR); merges still proceed.
 
