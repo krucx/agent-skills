@@ -123,6 +123,8 @@ expect "placeholder: template block is not a worker result" "$out" '"worker":nul
 printf '%s\n' "ORCHESTRATOR_WORKER_BLOCKED" "item: #13" "reason: <what stops you>" "needs: <the decision or access required>" "" "Working..." "ORCHESTRATOR_WORKER_BLOCKED" "item: #13" "reason: no push access" "needs: write access to the repo" "" >"$FIX/screens/t13"
 out=$(status)
 expect "placeholder: a real block after the template is detected" "$out" '"reason":"no push access"'
+printf '%s\n' "On a second hit, print ORCHESTRATOR_WORKER_BLOCKED and stop." "reason: the tests fail" "" >"$FIX/screens/t13"
+expect "worker: marker mid-sentence is not a block" "$(status)" '"worker":null'
 
 # --- worker replaced: terminal differs from the plan's ---------------------------------------
 sandbox
@@ -290,6 +292,9 @@ args=$(cat "$FIX/create.args")
 expect "dispatch: tag comes from the plan's groups" "$args" $'--tag\nwip'
 expect "dispatch: prompt starts with the skill" "$args" "/implement #20"
 expect "dispatch: prompt names the other items" "$args" "the others are working on #21."
+expect "dispatch: prompt stops on the same obstacle twice" "$args" "If you hit the same obstacle a second time"
+expect "dispatch: an unfixable PR check is not an obstacle" "$args" "a PR check you cannot fix is not an obstacle"
+expect "dispatch: markers go on a line of their own" "$args" "the marker on a line of its own"
 expect_not "dispatch: output never echoes the prompt" "$out" "ORCHESTRATOR_WORKER_DONE"
 
 # collision: remote branch, local branch, plan branch, and a PR each push the name to -2, -3, ...
