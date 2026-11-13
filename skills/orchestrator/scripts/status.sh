@@ -105,9 +105,18 @@ rows=$(jq -c --argjson tagged "$tagged" --argjson extra "$extra" --argjson plann
     }')
 
 # The last ORCHESTRATOR_WORKER_* block on a screen, as JSON (terminal-wrapped values rejoined).
+# A block whose fields are still <angle-bracket> placeholders is the prompt's own template, not a report.
 worker_block() {
   awk '
-    /ORCHESTRATOR_WORKER_(DONE|BLOCKED)/ { n = 0; key = ""; done = 0
+    function keep(   k, ph) {
+      if (marker == "") return
+      for (k in v) if (v[k] ~ /^<.*>$/) ph = 1
+      if (ph) return
+      for (k in best) delete best[k]
+      for (k in v) best[k] = v[k]
+      bestmarker = marker
+    }
+    /ORCHESTRATOR_WORKER_(DONE|BLOCKED)/ { keep(); n = 0; key = ""; done = 0
       marker = ($0 ~ /DONE/) ? "done" : "blocked"; delete v; next }
     marker == "" || done { next }
     { line = $0; sub(/^([[:space:]]|⏺|•|│)+/, "", line); sub(/([[:space:]]|│)+$/, "", line) }
@@ -115,7 +124,7 @@ worker_block() {
       key = substr(line, 1, index(line, ":") - 1); v[key] = substr(line, length(key) + 3); next }
     key != "" && (line == "" || line ~ /^(─|━|>|❯)/) { done = 1; next }
     key != "" { v[key] = v[key] " " line }
-    END { if (marker != "") { printf "marker\t%s\n", marker; for (k in v) printf "%s\t%s\n", k, v[k] } }' |
+    END { keep(); if (bestmarker != "") { printf "marker\t%s\n", bestmarker; for (k in best) printf "%s\t%s\n", k, best[k] } }' |
     jq -Rsc 'split("\n") | map(select(length > 0) | split("\t") | {(.[0]): (.[1:] | join("\t"))}) | add'
 }
 
