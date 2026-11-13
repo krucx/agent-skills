@@ -301,7 +301,7 @@ are `done`/`skipped` and each integration's PR is merged. Then [offer the run su
 ## Continue
 
 `plan.sh claim` (`--takeover` on exit 4), group map, reconcile, apply transitions and the user's
-`waiting` decisions, dispatch, watch.
+`waiting` decisions (including drops), [finish ready integrations](#finishing-an-integration), dispatch, watch.
 
 ## Report back
 
@@ -309,7 +309,8 @@ Never starts, messages or nudges workers. Load the plan (none: `status.sh <proje
 map, reconcile, derive transitions. `plan.sh check`: `mine`/`finished` → write the plan, move tags;
 `stale` → `plan.sh claim --takeover` (say so), same; `other` → table only, naming the `owner`.
 Add a line or two only on what needs the user; ready items: "say 'orchestrator continue' to start
-them".
+them". Run `integrate.sh check` (never `add`): report `held` integrations and name
+what holds them, and a `ready` one as "say 'orchestrator continue' to open its feature PR".
 
 ## Close
 
