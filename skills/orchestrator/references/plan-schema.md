@@ -10,13 +10,13 @@
 
 `status`: `active`|`finished`; `pageId`: the run-summary page's ID once published (absent: none; later
 [summaries](../SKILL.md#run-summary) pass it as `--page` to add a version); `plan.sh` adds `owner`, `heartbeat`, `takenOverFrom`, `forcedAt`,
-`carryOver`. `state` and `reason`: see SKILL.md. `ask`: a free-text
-task's slice of the user's request, verbatim (the task and its whole scope; the [acceptance
-check](../SKILL.md#acceptance-check) grades against it alone). `notes`: the orchestrator's build
-notes for it (context, out of scope), adding no work. `extras`: what the orchestrator would add
-beyond the `ask`, for the human only (possible follow-up work, never sent to the worker). All three
-`null` for tracker items, whose issue body is already the user's text. `text`: an older plan's
-single free-text description, still loaded and dispatched as before (no `ask`). `preset`: `auto`|`regular`. `presets`: per harness, the kinds
+`carryOver`. `state` and `reason`: see SKILL.md. `ask`: a free-text task's slice of the user's
+request, verbatim (the task and its whole scope; the [acceptance check](../SKILL.md#acceptance-check)
+grades against it alone). `notes`: the orchestrator's build notes for it (context, out of scope),
+adding no work. `extras`: what the orchestrator would add beyond the `ask`, for the human only
+(possible follow-up work, never sent to the worker). All three `null` for tracker items, whose issue
+body is already the user's text. `text`: an older plan's single free-text description, still loaded
+and dispatched as before; ignored when `ask` is set. `preset`: `auto`|`regular`. `presets`: per harness, the kinds
 [preflight](../SKILL.md#worker-agents-and-auto-approval) found. `autoOnly`: per harness with only an auto
 instance, the user's answer (`"accepted"`/`"declined"`; absent: not asked yet). `checked`: the
 worker's `checked:` line. `acceptance`: `null`, `"ok"`, or the [gap](../SKILL.md#acceptance-check).
