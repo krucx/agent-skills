@@ -117,7 +117,7 @@ expect "worker: compact shows checked" "$(status --compact)" "worker done, check
 sandbox
 plan_with "[$(item '#13' in-progress w13 t13)]"
 ws w13 b-#13 "In Progress"; snapshot w13 t13 working
-printf '%s\n' "Finish your last message with exactly one of:" "ORCHESTRATOR_WORKER_BLOCKED" "item: #13" "reason: <what stops you>" "needs: <the decision or access required>" "" >"$FIX/screens/t13"
+printf '%s\n' "  cannot fix, or the same missing access), do not try again: print ORCHESTRATOR_WORKER_BLOCKED" "  with \`reason:\` naming that obstacle and \`needs:\` naming what would clear it, and stop." "Finish your last message with exactly one of:" "ORCHESTRATOR_WORKER_BLOCKED" "item: #13" "reason: <what stops you>" "needs: <the decision or access required>" "" >"$FIX/screens/t13"
 out=$(status)
 expect "placeholder: template block is not a worker result" "$out" '"worker":null'
 printf '%s\n' "ORCHESTRATOR_WORKER_BLOCKED" "item: #13" "reason: <what stops you>" "needs: <the decision or access required>" "" "Working..." "ORCHESTRATOR_WORKER_BLOCKED" "item: #13" "reason: no push access" "needs: write access to the repo" "" >"$FIX/screens/t13"
@@ -290,6 +290,7 @@ args=$(cat "$FIX/create.args")
 expect "dispatch: tag comes from the plan's groups" "$args" $'--tag\nwip'
 expect "dispatch: prompt starts with the skill" "$args" "/implement #20"
 expect "dispatch: prompt names the other items" "$args" "the others are working on #21."
+expect "dispatch: prompt stops on the same obstacle twice" "$args" "If you hit the same obstacle a second time"
 expect_not "dispatch: output never echoes the prompt" "$out" "ORCHESTRATOR_WORKER_DONE"
 
 # collision: remote branch, local branch, plan branch, and a PR each push the name to -2, -3, ...

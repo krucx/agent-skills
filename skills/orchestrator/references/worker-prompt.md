@@ -22,6 +22,9 @@ After the first line the prompt carries, in this order (exact wording lives in `
   commits on the branch, so the PR conflicts until then);
 - the goal is an open PR: push and `gh pr create` even if the skill stops at a commit; ask a
   human decision plainly and stop;
+- the same obstacle a second time (the same failing command, the same check it can't fix, or the
+  same missing access) means stop, not retry: print `ORCHESTRATOR_WORKER_BLOCKED` with `reason:`
+  naming the obstacle and `needs:` what would clear it;
 - done means the PR's checks have finished and it is mergeable: `gh pr checks <n> --watch
   --fail-fast` (read the exit code and failed check names only), tail `gh run view <run-id>
   --log-failed` for a failure (never green logs), fix, push, watch again; then confirm

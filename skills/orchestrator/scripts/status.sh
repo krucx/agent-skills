@@ -114,7 +114,8 @@ rows=$(jq -c --argjson tagged "$tagged" --argjson extra "$extra" --argjson plann
     }')
 
 # The last ORCHESTRATOR_WORKER_* block on a screen, as JSON (terminal-wrapped values rejoined).
-# A block whose fields are still <angle-bracket> placeholders is the prompt's own template, not a report.
+# A block whose fields are still <angle-bracket> placeholders is the prompt's own template, not a report;
+# the marker counts only on a line of its own, so the prompt naming it mid-sentence is not one either.
 worker_block() {
   awk '
     function keep(   k, ph) {
@@ -125,10 +126,10 @@ worker_block() {
       for (k in v) best[k] = v[k]
       bestmarker = marker
     }
-    /ORCHESTRATOR_WORKER_(DONE|BLOCKED)/ { keep(); n = 0; key = ""; done = 0
-      marker = ($0 ~ /DONE/) ? "done" : "blocked"; delete v; next }
-    marker == "" || done { next }
     { line = $0; sub(/^([[:space:]]|⏺|•|│)+/, "", line); sub(/([[:space:]]|│)+$/, "", line) }
+    line ~ /^ORCHESTRATOR_WORKER_(DONE|BLOCKED)$/ { keep(); n = 0; key = ""; done = 0
+      marker = (line ~ /DONE/) ? "done" : "blocked"; delete v; next }
+    marker == "" || done { next }
     line ~ /^(item|pr|summary|checked|reason|needs):/ {
       key = substr(line, 1, index(line, ":") - 1); v[key] = substr(line, length(key) + 3); next }
     key != "" && (line == "" || line ~ /^(─|━|>|❯)/) { done = 1; next }

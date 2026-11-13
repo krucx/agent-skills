@@ -125,6 +125,9 @@ others=$(jq -r --arg id "$id" '[.items[] | select(.id != $id) | .id] | join(", "
   printf '%s\n' "- Your goal is an open pull request. When the work is committed, push the branch and open the" \
     "  PR yourself (\`gh pr create\`), even if your skill stops at a commit. If you need a decision" \
     "  from a human, ask it plainly and stop." \
+    "- If you hit the same obstacle a second time (the same failing command, the same check you" \
+    "  cannot fix, or the same missing access), do not try again: print ORCHESTRATOR_WORKER_BLOCKED" \
+    "  with \`reason:\` naming that obstacle and \`needs:\` naming what would clear it, and stop." \
     "- You are done when the PR's checks have finished and it is mergeable, not when it is open." \
     "  Before printing ORCHESTRATOR_WORKER_DONE, run \`gh pr checks <n> --watch --fail-fast\` and read" \
     "  only its exit code and the names of failed checks. For a failed check, tail" \
