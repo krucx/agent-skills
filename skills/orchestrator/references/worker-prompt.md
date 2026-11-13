@@ -26,6 +26,11 @@ After the first line the prompt carries, in this order (exact wording lives in `
   stop, not retry: print `ORCHESTRATOR_WORKER_BLOCKED` with `reason:` naming the obstacle and
   `needs:` what would clear it; once the PR is open, a PR check it can't fix is not an obstacle
   and goes in `checked:` (a block after the PR exists would land the item in `in-review`);
+- before ending a turn with its own background work running (e.g. code-review subagents), or
+  while waiting on something external that clears by itself, print `ORCHESTRATOR_WORKER_WAITING`
+  (below) once per wait, never on every poll or during active implementation. Waiting is not
+  blocked: a wait clears on its own, a block needs the orchestrator or the user; what it waits on
+  failing is an obstacle as above. A later DONE or BLOCKED block replaces the wait;
 - done means the PR's checks have finished and it is mergeable: `gh pr checks <n> --watch
   --fail-fast` (read the exit code and failed check names only), tail `gh run view <run-id>
   --log-failed` for a failure (never green logs), fix, push, watch again; then confirm
@@ -48,4 +53,15 @@ ORCHESTRATOR_WORKER_BLOCKED
 item: <ID>
 reason: <what stops you>
 needs: <the decision or access required>
+```
+
+The wait block (not a final report; `status.sh` shows it as marker `waiting` with `waitingOn` and
+`resumesWhen`, and the orchestrator skips the worker while it is the latest block; the same wait
+still latest after 30 minutes is `stale` and gets a screen check instead):
+
+```text
+ORCHESTRATOR_WORKER_WAITING
+item: <ID>
+waiting-on: <what you are waiting for>
+resumes-when: <what ends the wait>
 ```

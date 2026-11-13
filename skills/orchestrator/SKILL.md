@@ -197,7 +197,7 @@ hand.
 ### Worker prompt
 
 `dispatch.sh` builds and sends it; change it in the script. Contents and the
-DONE/BLOCKED report format: [references/worker-prompt.md](references/worker-prompt.md).
+DONE/BLOCKED/WAITING report format: [references/worker-prompt.md](references/worker-prompt.md).
 
 ## Reconcile
 
@@ -230,8 +230,16 @@ failed until timeout): check connectivity, reconcile, restart.
 
 Read (worker block from status.sh first): `superset terminals read --local --workspace <id>
 --terminal <tid> --max-lines 60`. Send: `superset terminals send … --text "<answer>"`.
-`idle` is not done while background work (e.g. code-review subagents) runs: before any `idle`
-row, read the screen; while it runs, skip the row (no transition, no follow-up, not counted).
+**Declared wait**: an `idle` row whose latest worker block is `waiting`
+(`ORCHESTRATOR_WORKER_WAITING`: its own background work, e.g. code-review subagents, or something
+external that clears on its own) is busy, whatever the table below says for `idle`: skip it (no
+transition, no follow-up, not counted as done), without reading the screen. A later DONE or BLOCKED
+block replaces the wait. A **stale** wait (`stale`: the same wait still latest after 30 minutes)
+gets a screen check each cycle: still running, skip it; nothing running, treat it as no declared
+wait (the rows below apply). Waiting is not blocked: only a BLOCKED block (or a row below) needs you or
+the user. Fallback, only for an `idle` row with no declared wait (no worker block, or in `feedback`
+only an earlier round's): read the screen first; background work still running there is skipped
+the same way.
 
 | Seen | Do |
 | --- | --- |
@@ -242,7 +250,7 @@ row, read the screen; while it runs, skip the row (no transition, no follow-up, 
 | Agent `stalled` | Read the screen; tell the user, suggesting a new worker in the same workspace. Never restart it yourself. |
 | Agent `blocked` with a `reason` (fatal banner: usage limit, expired sign-in…) | `blocked` with that reason, free the slot, tell the user. |
 | Agent `blocked` (Paradev's "needs input") | Read the screen; show the exact question; desktop-notify. User answers in the worker's chat (relay with send if in yours). Never answer permission prompts or decide scope/product for them. |
-| `in-progress`, agent `idle`, no PR | `ORCHESTRATOR_WORKER_BLOCKED` printed or one follow-up already sent: `blocked` with its reason, free the slot, tell the user. Else one follow-up: finish and open the PR. |
+| `in-progress`, agent `idle`, no PR, no declared wait | `ORCHESTRATOR_WORKER_BLOCKED` printed or one follow-up already sent: `blocked` with its reason, free the slot, tell the user. Else one follow-up: finish and open the PR. |
 | PR `MERGED` | `done`; unstarted dependents base on `main`; send follow-ups waiting on it. |
 | PR `CLOSED` unmerged | `blocked`, "PR closed unmerged"; tell the user. |
 | Stacked item's PR `conflicting` (status.sh: `CONFLICTING (base <parent branch>)`) and its parent is `done` | Send the worker, unasked, the rebase follow-up: `git fetch origin && git rebase --onto origin/main <parent tip> HEAD`, `git push --force-with-lease`, remove "merge <parent> first" from the PR description. `feedback`, reason "follow-up sent". Once per item; still `CONFLICTING` after it, tell the user. |
@@ -332,8 +340,8 @@ One row per run item, plan order:
 | #345 | Split backup job | Queued (after #341) | — | — |
 ```
 
-`Agent`: `running`, `stalled`, `waiting for input` (Paradev `blocked`, or it asked), `done`
-(`idle`), `—`. `Group`: sidebar group, `Queued (after <ID>)`, `Waiting (<reason>)`, `Skipped`.
+`Agent`: `running`, `waiting` (a declared wait), `stalled`, `waiting for input` (Paradev
+`blocked`, or it asked), `done` (`idle`), `—`. `Group`: sidebar group, `Queued (after <ID>)`, `Waiting (<reason>)`, `Skipped`.
 Below it only: worker questions, `Blocked` reasons, stalls, dependency decisions, closed PRs,
 missing workspaces, acceptance gaps, a just-in-review item's `checked`
 ("#340 checked: ran the CI workflow on a fork; Pester cache hit on the second run").
