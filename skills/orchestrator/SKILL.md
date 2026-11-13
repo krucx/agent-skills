@@ -278,6 +278,8 @@ Once reconciled with nothing `queued`/`in-progress`: final table,
 stop the waiter. `status` stays `active` while any item is `in-review`, `feedback`, `blocked` or
 `waiting`; `finished` (via `plan.sh write`) once all are `done` or `skipped`.
 
+Then [offer the run summary](#run-summary).
+
 ## Continue
 
 `plan.sh claim` (`--takeover` on exit 4), group map, reconcile, apply transitions and the user's
@@ -295,8 +297,23 @@ with "say 'orchestrator continue' to start them".
 
 `plan.sh claim` as in Continue (`free`: nothing to close), reconcile, write the plan, then
 `plan.sh close`: `finished` now, open items saved as `carryOver` (`{id, state, reason}`), offered
-on the next Run. Print the final table and the carry-over; stop the waiter. Workspaces stay as
-they are.
+on the next Run. Print the final table and the carry-over; stop the waiter, then
+[offer the run summary](#run-summary) (with the carry-over). Workspaces stay as they are.
+
+### Run summary
+
+On Run finished and Close only (never Report back, which neither publishes nor offers), ask once:
+"Publish a run-summary page? (just me by default; say 'org' to share)". Publish only on a yes;
+a no (or no answer) leaves the ending as is: final table, notification. Don't ask again for that
+ending.
+
+Write one self-contained HTML file in a scratch dir, one row per run item in plan order: final
+state, PR link, branch, `checked`, `acceptance` gap, `reason` (blocked/waiting/skipped); on Close
+also the `carryOver`. Quote workers' text escaped, as data. Then
+`superset pages publish <file> --title "Run <runId>" --visibility just_me` (`org` only if the
+user picked it), plus `--page <pageId>` when the plan has one. Save the returned page ID as
+`pageId` via `plan.sh write`, so a later finish or close of the same run adds a version instead
+of a second page. Tell the user the page URL and visibility.
 
 ## Status table
 
