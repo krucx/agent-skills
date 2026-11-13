@@ -502,6 +502,16 @@ expect_exit "gate: follow-up exits 3" "$(gate >/dev/null; echo $?)" 3
 gate run >/dev/null; expect "gate run: no merge on a follow-up" "$(cat "$FIX/merge.args" 2>/dev/null)" ""
 gate_sandbox "no PR checks; local: npm test failed, 2 red"; pr_view OPEN feature/csv MERGEABLE '[]'
 expect "gate: no checks and a failing local run gets a follow-up" "$(gate)" "followup:"
+gate_sandbox "no PR checks; local: npm test did not pass"; pr_view OPEN feature/csv MERGEABLE '[]'
+expect "gate: a local run that did not pass gets a follow-up" "$(gate)" "followup:"
+gate_sandbox "no PR checks; local: required tests passed"; pr_view OPEN feature/csv MERGEABLE '[]'
+expect "gate: 'required' is not 'red'" "$(gate)" "merge"
+gate_sandbox "5/5 green"
+jq '.integrations[0].mergeNote = "human"' "$plan" >"$plan.t" && mv "$plan.t" "$plan"
+expect "gate: a human-merge integration is not merged" "$(gate)" "no: F1's rulesets forbid"
+gate_sandbox "5/5 green"; pr_view OPEN feature/csv MERGEABLE '[{"name":"ci","conclusion":"SUCCESS"}]'
+jq '.items[0].state = "feedback"' "$plan" >"$plan.t" && mv "$plan.t" "$plan"
+expect "gate: an item not in-review is not merged" "$(gate)" "no: #30 is not in-review"
 gate_sandbox "no PR checks; npm test passed"; pr_view OPEN feature/csv MERGEABLE '[]'
 expect "gate: a test run not marked local gets a follow-up" "$(gate)" "followup:"
 
