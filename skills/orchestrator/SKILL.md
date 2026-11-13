@@ -214,8 +214,9 @@ orchestrator coordinates the run; the others are working on <other IDs>.
   project names, container names, scratch or data directories and temp files, and don't bind
   fixed host ports that another worker might also use.
 - Stacked: this branch starts from <branch> (PR #<m>, not merged yet). Say "Stacked on #<m>;
-  merge that first" in your PR description. When #<m> merges, run `git fetch origin && git rebase
-  --onto origin/main <branch's tip before the merge> HEAD`, then `git push --force-with-lease`,
+  merge that first" in your PR description. Note the parent tip now (`git rev-parse HEAD` before
+  your first commit). When #<m> merges, run `git fetch origin && git rebase --onto origin/main
+  <that tip> HEAD`, then `git push --force-with-lease`,
   and delete the "merge that first" line from the PR description (a squash-merge leaves the
   parent's commits on your branch, so the PR conflicts until you do).
 - Your goal is an open pull request. When the work is committed, push the branch and open the
