@@ -18,8 +18,10 @@
 #                                     block is; reason is that line
 #                            stalled  Paradev says working but the screen hasn't changed for
 #                                     STALL_MINUTES (default 15)
-#   worker                 the last ORCHESTRATOR_WORKER_DONE/BLOCKED block on screen as
-#                          {marker, item, pr, summary, checked, reason, needs}, or null
+#   worker                 the last ORCHESTRATOR_WORKER_DONE/BLOCKED/WAITING block on screen as
+#                          {marker, item, pr, summary, checked, reason, needs, waitingOn,
+#                          resumesWhen}, or null; marker "waiting" is a declared wait (busy, not
+#                          done), and a later DONE or BLOCKED block replaces it
 #   pr                     newest PR for the branch {number,url,state,isDraft}, or null; an open
 #                          PR GitHub reports CONFLICTING also has "conflicting": true and
 #                          "base" (its base branch), from one filtered `gh pr list` for all PRs
@@ -127,15 +129,17 @@ worker_block() {
       bestmarker = marker
     }
     { line = $0; sub(/^([[:space:]]|⏺|•|│)+/, "", line); sub(/([[:space:]]|│)+$/, "", line) }
-    line ~ /^ORCHESTRATOR_WORKER_(DONE|BLOCKED)$/ { keep(); n = 0; key = ""; done = 0
-      marker = (line ~ /DONE/) ? "done" : "blocked"; delete v; next }
+    line ~ /^ORCHESTRATOR_WORKER_(DONE|BLOCKED|WAITING)$/ { keep(); n = 0; key = ""; done = 0
+      marker = line; sub(/^ORCHESTRATOR_WORKER_/, "", marker); marker = tolower(marker); delete v; next }
     marker == "" || done { next }
-    line ~ /^(item|pr|summary|checked|reason|needs):/ {
+    line ~ /^(item|pr|summary|checked|reason|needs|waiting-on|resumes-when):/ {
       key = substr(line, 1, index(line, ":") - 1); v[key] = substr(line, length(key) + 3); next }
     key != "" && (line == "" || line ~ /^(─|━|>|❯)/) { done = 1; next }
     key != "" { v[key] = v[key] " " line }
     END { keep(); if (bestmarker != "") { printf "marker\t%s\n", bestmarker; for (k in best) printf "%s\t%s\n", k, best[k] } }' |
-    jq -Rsc 'split("\n") | map(select(length > 0) | split("\t") | {(.[0]): (.[1:] | join("\t"))}) | add'
+    jq -Rsc 'split("\n") | map(select(length > 0) | split("\t") | {(.[0]): (.[1:] | join("\t"))}) | add
+      | if . then with_entries(.key |= ({"waiting-on": "waitingOn", "resumes-when": "resumesWhen"}[.] // .))
+        else . end'
 }
 
 # Plan workspaces: read the screen's tail for the worker block, fatal banners and stalls.
@@ -151,9 +155,10 @@ out=$(while IFS= read -r row; do
       --terminal "$t" --max-lines 60 --json 2>/dev/null | jq -r '.text // empty'); then
     hash=$(printf '%s' "$text" | cksum | tr -d ' \t')
     worker=$(printf '%s\n' "$text" | worker_block)
-    # A finished worker block wins: its summary may mention "rate limit" and the like.
+    # A finished worker block wins: its summary may mention "rate limit" and the like. A declared
+    # wait doesn't: the worker is still running, so a banner after it still blocks.
     banner=''
-    [[ $worker == null || -z $worker ]] && banner=$(printf '%s\n' "$text" | tail -n 20 |
+    [[ $worker == null || -z $worker || $worker == *'"marker":"waiting"'* ]] && banner=$(printf '%s\n' "$text" | tail -n 20 |
       grep -iE "$FATAL" | tail -n 1 | sed -E 's/^[[:space:]]+|[[:space:]]+$//g' | cut -c1-200 || true)
     row=$(jq -c --arg t "$t" --arg hash "$hash" --arg banner "$banner" --argjson worker "${worker:-null}" \
       --argjson seen "$seen" --argjson now "$now" --argjson stall $((STALL_MINUTES * 60)) '
@@ -186,6 +191,8 @@ if [[ -n $compact ]]; then
          + (if .inPlan and .agent.terminal and .planTerminal != .agent.terminal
             then ["terminal \(.agent.terminal) (\(.agent.id))"] else [] end)
          + (if .worker then ["worker \(.worker.marker)"
+              + (if .worker.waitingOn then ", on: \(.worker.waitingOn)" else "" end)
+              + (if .worker.resumesWhen then ", until: \(.worker.resumesWhen)" else "" end)
               + (if .worker.checked then ", checked: \(.worker.checked)" else "" end)
               + (if .worker.reason then ", reason: \(.worker.reason)" else "" end)] else [] end)
          | join(" | ")' <<<"$out"

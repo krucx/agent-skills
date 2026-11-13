@@ -129,6 +129,15 @@ others=$(jq -r --arg id "$id" '[.items[] | select(.id != $id) | .id] | join(", "
     "  access), do not try again: print ORCHESTRATOR_WORKER_BLOCKED with \`reason:\` naming that" \
     "  obstacle and \`needs:\` naming what would clear it, and stop. Once the PR is open," \
     "  a PR check you cannot fix is not an obstacle: it goes in \`checked:\` as below." \
+    "- Before you end a turn with your own background work still running (code-review subagents," \
+    "  say), or wait on something outside you that will finish by itself, print this once per" \
+    "  wait (not on every check, and never while you are actively implementing), the marker on a" \
+    "  line of its own:" \
+    "  ORCHESTRATOR_WORKER_WAITING" "  item: $id" "  waiting-on: <what you are waiting for>" \
+    "  resumes-when: <what ends the wait>" \
+    "  Waiting is not blocked: a wait clears on its own, a block needs the orchestrator or a human." \
+    "  If what you wait on fails or stops, that is an obstacle as above. When the wait ends, carry" \
+    "  on and finish with one of the blocks below; it replaces the wait." \
     "- You are done when the PR's checks have finished and it is mergeable, not when it is open." \
     "  Before printing ORCHESTRATOR_WORKER_DONE, run \`gh pr checks <n> --watch --fail-fast\` and read" \
     "  only its exit code and the names of failed checks. For a failed check, tail" \

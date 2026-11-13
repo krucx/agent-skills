@@ -126,6 +126,33 @@ expect "placeholder: a real block after the template is detected" "$out" '"reaso
 printf '%s\n' "On a second hit, print ORCHESTRATOR_WORKER_BLOCKED and stop." "reason: the tests fail" "" >"$FIX/screens/t13"
 expect "worker: marker mid-sentence is not a block" "$(status)" '"worker":null'
 
+# --- worker block: a declared wait, then superseded by DONE ----------------------------------
+sandbox
+plan_with "[$(item '#14' in-progress w14 t14)]"
+ws w14 b-#14 "In Progress"; snapshot w14 t14 idle
+printf '%s\n' "⏺ ORCHESTRATOR_WORKER_WAITING" "  item: #14" "  waiting-on: three code-review subagents" \
+  "  resumes-when: they report back" "" >"$FIX/screens/t14"
+out=$(status)
+expect "waiting: marker" "$out" '"marker":"waiting"'
+expect "waiting: waiting-on" "$out" '"waitingOn":"three code-review subagents"'
+expect "waiting: resumes-when" "$out" '"resumesWhen":"they report back"'
+expect "waiting: compact names the wait" "$(status --compact)" "worker waiting, on: three code-review subagents"
+printf '%s\n' "ORCHESTRATOR_WORKER_WAITING" "item: #14" "waiting-on: <what you are waiting for>" \
+  "resumes-when: <what ends the wait>" "" >"$FIX/screens/t14"
+expect "waiting: the prompt's placeholder is not a report" "$(status)" '"worker":null'
+printf '%s\n' "ORCHESTRATOR_WORKER_WAITING" "item: #14" "waiting-on: CI" "resumes-when: checks finish" "" \
+  "ORCHESTRATOR_WORKER_DONE" "item: #14" "pr: https://github.com/acme/app/pull/14" "summary: done" "" >"$FIX/screens/t14"
+out=$(status)
+expect "waiting: a later DONE replaces it" "$out" '"marker":"done"'
+expect_not "waiting: no waiting-on left from the wait" "$out" "waitingOn"
+printf '%s\n' "ORCHESTRATOR_WORKER_WAITING" "item: #14" "waiting-on: CI" "resumes-when: checks finish" "" \
+  "ORCHESTRATOR_WORKER_BLOCKED" "item: #14" "reason: CI runner offline" "needs: a runner" "" >"$FIX/screens/t14"
+expect "waiting: a later BLOCKED replaces it" "$(status)" '"marker":"blocked"'
+snapshot w14 t14 working
+printf '%s\n' "ORCHESTRATOR_WORKER_WAITING" "item: #14" "waiting-on: CI" "resumes-when: checks finish" "" \
+  "  ■ You've hit your usage limit. Try again in 3 hours." "" >"$FIX/screens/t14"
+expect "waiting: a fatal banner still blocks a waiting worker" "$(status)" '"state":"blocked"'
+
 # --- worker replaced: terminal differs from the plan's ---------------------------------------
 sandbox
 plan_with "[$(item '#4' in-progress w4 t-old)]"
@@ -294,6 +321,9 @@ expect "dispatch: prompt starts with the skill" "$args" "/implement #20"
 expect "dispatch: prompt names the other items" "$args" "the others are working on #21."
 expect "dispatch: prompt stops on the same obstacle twice" "$args" "If you hit the same obstacle a second time"
 expect "dispatch: an unfixable PR check is not an obstacle" "$args" "a PR check you cannot fix is not an obstacle"
+expect "dispatch: prompt defines the wait block" "$args" "ORCHESTRATOR_WORKER_WAITING"
+expect "dispatch: wait block names what it waits on" "$args" "waiting-on: <what you are waiting for>"
+expect "dispatch: waiting is not blocked" "$args" "Waiting is not blocked"
 expect "dispatch: markers go on a line of their own" "$args" "the marker on a line of its own"
 expect_not "dispatch: output never echoes the prompt" "$out" "ORCHESTRATOR_WORKER_DONE"
 
