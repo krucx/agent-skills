@@ -78,6 +78,7 @@ harness with only an auto instance, the user's answer (`"accepted"`, or `"declin
 not asked yet. `checked`: worker's `checked:` line.
 `acceptance`: `null`, `"ok"`, or the [gap](#acceptance-check). `followUp`: `null` or
 `{"after": "<ID>", "message": "<text>"}` ([after a merge](#follow-ups-after-a-merge)).
+`dispatchFailures`: set by `dispatch.sh` after a failed workspace creation.
 
 Facts (workspace, branch, agent and PR state) come from Paradev and GitHub; intent (items,
 dependencies, skill, agent, why waiting/blocked/skipped) from the plan. Write the plan, then the
@@ -183,31 +184,30 @@ waits for its parent to merge, then starts on `main`. Exception: the user says t
 only a soft ordering, so start it on `main` at once. Otherwise stack, and the worker prompt
 carries the rebase recipe.
 
-**Branch**: `issue-340-<slug>`, lowercase key (`eng-123-<slug>`), or `task-<runId>-t1-<slug>`
-(free text). `<slug>`: lowercase ASCII title, other runs one hyphen, at most 4 words; branch ≤ 60
-characters, no edge hyphens. Taken (`git ls-remote --heads origin`, local `refs/heads`, the plan,
-or `superset workspaces list --local --project <id> --search <branch> --json`): append `-2`,
-`-3`, … Never reuse a branch you didn't create for this item.
+Run `<skill-dir>/scripts/dispatch.sh <project-id> <plan-file> <ID> [--base <branch>] [--preset <id>]`
+inside the repo. It does the whole sequence and stops at the first failing step:
 
-**Write the plan first** (`in-progress`, branch set), then:
+1. **Branch**: `issue-340-<slug>`, lowercase key (`eng-123-<slug>`), or `task-<runId>-t1-<slug>`
+   (free text); `<slug>` is at most 4 words, branch ≤ 60 characters. Taken on origin
+   (`git ls-remote --heads origin <branch>`), locally, in the plan, or by a PR
+   (`gh pr list --head <branch> --state all`): appends `-2`, `-3`, …
+2. **Plan**: the item becomes `in-progress` with the branch (via `plan.sh write`).
+3. **Workspace**: `superset workspaces create` with the [worker prompt](#worker-prompt) below
+   (built by the script, never echoed), the plan's In Progress tag, `--skip-branch-prefix`, no
+   `--model`. On failure the item goes back to `queued`, or to `blocked` with the error as
+   reason on the second failure (`dispatchFailures`).
+4. **Record**: workspace ID, Paradev's reported branch, terminal ID (`create`'s
+   `agents[].sessionId`, else the snapshot's terminal with `agent` set).
 
-```bash
-superset workspaces create --local --project <project-id> \
-  --name "<ID> <short title>" \
-  --branch <branch> --skip-branch-prefix \
-  --base-branch <main, or the dependency's branch> \
-  --tag "<In Progress's tag>" \
-  --agent <auto instance id, or preset id> \
-  --prompt "<worker prompt>" \
-  --json
-```
-
-`--skip-branch-prefix` keeps the branch as given. Stacked: base on an unmerged dependency's
-branch, else `main`. No `--model`. Failure: `queued`; second failure `blocked`, error as reason.
-Success: plan gets the workspace ID, Paradev's reported branch, terminal ID = `create`'s `agents[].sessionId` (`terminals` may be
-empty); only without `sessionId`, `superset snapshot --json`'s terminal there with `agent` set.
+`--base`: the dependency's unmerged branch for a stacked item (the prompt gets the stacked line),
+else omit for the default branch. `--preset`: the auto instance ID or preset ID (default: the
+item's `agent`). Output: one `dispatched …` line, or `dispatch <ID> failed at <step>: …` (exit 1);
+if the failing step is `rollback` or `record`, fix the plan by hand before going on. Dispatch
+nothing by hand.
 
 ### Worker prompt
+
+What `dispatch.sh` sends; change it in the script.
 
 | Worker agent | First line |
 | --- | --- |

@@ -2,6 +2,9 @@
 # Test shim for the Paradev CLI: answers from JSON fixtures in $FIX instead of a host.
 #   $FIX/snapshot.json    superset snapshot --json
 #   $FIX/workspaces.json  [{id, name, branch, tags}]; list filters by --tag, get by ID
+#   $FIX/create-fail      when present, workspaces create fails with its text as the error
+#   $FIX/create.json      what workspaces create prints (default: workspace w-new, session t-new)
+#   $FIX/create.args      the arguments of the last workspaces create call, one per line
 #   $FIX/screens/<tid>    the text terminals read returns for terminal <tid>
 set -euo pipefail
 arg() { local want=$1; shift; while (($#)); do [[ $1 == "$want" ]] && { echo "$2"; return; }; shift; done; }
@@ -12,6 +15,11 @@ case "$1 ${2:-}" in
       'map(select($tag == "" or ((.tags // "") | ascii_downcase) == ($tag | ascii_downcase)))' \
       "$FIX/workspaces.json" ;;
   "workspaces get") jq -ce --arg id "$3" '.[] | select(.id == $id)' "$FIX/workspaces.json" ;;
+  "workspaces create")
+    printf '%s\n' "$@" >"$FIX/create.args"
+    [[ ! -f $FIX/create-fail ]] || { cat "$FIX/create-fail" >&2; exit 1; }
+    if [[ -f $FIX/create.json ]]; then cat "$FIX/create.json"
+    else jq -nc --arg b "$(arg --branch "$@")" '{id: "w-new", branch: $b, agents: [{sessionId: "t-new"}]}'; fi ;;
   "terminals read")
     f="$FIX/screens/$(arg --terminal "$@")"
     [[ -f $f ]] || { echo "terminal not found" >&2; exit 1; }
