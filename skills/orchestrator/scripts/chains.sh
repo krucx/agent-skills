@@ -13,6 +13,8 @@
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
+default_base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)
+default_base=${default_base:-main}
 
 # Each chain as {items: [ids in plan order], root: <item>}.
 chains() {
@@ -67,8 +69,8 @@ case ${1:-} in
       [[ -n $c ]] || { echo "$id is in no offered chain" >&2; exit 1; }
       f=$(next_id "$plan")
       b=$(branch_for "$(jq -r .root <<<"$c")" "$(jq -r .title <<<"$c")")
-      apply "$plan" --arg f "$f" --arg b "$b" --argjson c "$c" \
-        '.integrations = (.integrations // []) + [{id: $f, title: $c.title, branch: $b, base: "main", pr: null, state: "open"}]
+      apply "$plan" --arg f "$f" --arg b "$b" --arg base "$default_base" --argjson c "$c" \
+        '.integrations = (.integrations // []) + [{id: $f, title: $c.title, branch: $b, base: $base, pr: null, state: "open"}]
          | .items |= map(if (.id as $x | $c.items | index($x)) then .integration = $f else . end)'
       echo "added $f $b: $(jq -r '.items | join(", ")' <<<"$c")"
     done ;;
@@ -76,8 +78,8 @@ case ${1:-} in
     plan=$2 slug=$(slug "${3:?usage: chains.sh share <plan-file> <slug>}" 50)
     [[ -n $slug ]] || { echo "empty slug" >&2; exit 1; }
     f=$(next_id "$plan")
-    apply "$plan" --arg f "$f" --arg b "feature/$slug" \
-      '.integrations = (.integrations // []) + [{id: $f, title: $b, branch: $b, base: "main", pr: null, state: "open"}]
+    apply "$plan" --arg f "$f" --arg b "feature/$slug" --arg base "$default_base" \
+      '.integrations = (.integrations // []) + [{id: $f, title: $b, branch: $b, base: $base, pr: null, state: "open"}]
        | .items |= map(if (.integration // null) == null and (.integrates // null) == null and .state != "skipped"
                        then .integration = $f else . end)'
     echo "added $f feature/$slug" ;;

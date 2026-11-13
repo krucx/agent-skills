@@ -12,6 +12,8 @@
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
+default_base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)
+default_base=${default_base:-main}
 
 fetch() { # fetch <epic> [plan]
   local epic=$1 plan=${2:-} repo parent subs planned='[]'
@@ -40,10 +42,10 @@ case ${1:-} in
     tmp=$(mktemp "${TMPDIR:-/tmp}/epic.XXXXXX")
     trap 'rm -f "$tmp"' EXIT
     slug=$(jq -r '.epic.title' <<<"$data" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' | cut -c1-40 | sed -E 's/-+$//')
-    jq --argjson d "$data" --arg n "$epic" --arg s "$slug" '
+    jq --argjson d "$data" --arg n "$epic" --arg s "$slug" --arg base "$default_base" '
       ([.integrations[]?.id | ltrimstr("F") | tonumber?] | max // 0 | . + 1 | "F\(.)") as $f
       | .integrations = (.integrations // []) + [{id: $f, title: $d.epic.title, branch: "feature/\($n)-\($s)",
-          base: "main", pr: null, state: "open", epic: $d.epic}]
+          base: $base, pr: null, state: "open", epic: $d.epic}]
       | .items += [$d.items[] | {id, title, integration: $f, dependsOn: [], skill: "implement", agent: "claude",
           preset: "auto", state: "queued", branch: null, workspace: null, terminal: null, pr: null,
           checked: null, acceptance: null, followUp: null, ask: null, notes: null, extras: null}]' "$plan" >"$tmp"
