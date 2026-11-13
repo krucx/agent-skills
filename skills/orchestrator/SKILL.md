@@ -1,6 +1,6 @@
 ---
 name: orchestrator
-description: Act as the master agent that plans a batch of issues (GitHub, Linear, Jira, or free-text work broken into tasks) and runs them in parallel through Paradev (formerly Superset), each in its own worktree workspace with a worker agent running an implement skill, moving workspaces between the In Progress, In Review, Done and Blocked sidebar groups as their PRs appear and merge. Also answers "orchestrator report back" with a short status table, "orchestrator continue" to resume a run, and "orchestrator close" to end one. Use whenever the user says "orchestrate", "orchestrate these issues", "orchestrate 340 to 345", "orchestrate and work", "be the master agent", "run these issues in parallel", "spin up agents for these tickets", or "orchestrator report back" / "status" / "continue" / "close", even if they don't mention Paradev.
+description: Act as the master agent that plans a batch of tracker issues (GitHub, Linear, Jira) or free-text work broken into tasks, and drives each one to its own pull request through Paradev (formerly Superset), each in its own worktree workspace with a worker agent running an implement skill, with a saved, resumable plan and workspaces moved between the In Progress, In Review, Done and Blocked sidebar groups as their PRs appear and merge. Also answers "orchestrator report back" with a short status table, "orchestrator continue" to resume a run, and "orchestrator close" to end one. Use whenever the user says "orchestrate", "orchestrate these issues", "orchestrate 340 to 345", "orchestrate and work", "be the master agent", or "orchestrator report back" / "status" / "continue" / "close", even if they don't mention Paradev. Not for small ad-hoc fan-outs with no tracker, no PRs and no need to resume (e.g. "run these 3 refactors in parallel and tell me when done"): those belong to `superset:orchestrate`.
 compatibility: Needs bash, jq, git, the GitHub CLI (gh, signed in) and the Paradev CLI (superset, paradev or pdev; any one of them) with this machine's host running. Pull requests must live on GitHub.
 model: sonnet
 effort: low
@@ -19,6 +19,10 @@ its `--help` is authoritative). `<skill-dir>` is this file's folder (usually
 `~/.agents/skills/orchestrator`). Run scripts inside the repo.
 
 ## Modes
+
+Small ad-hoc fan-outs (no tracker, no PRs, no need to resume, e.g. "run these 3 refactors in parallel
+and tell me when done") belong to `superset:orchestrate`; point the user there instead of starting a run.
+Free-text work stays here, since it still produces one PR per task.
 
 | The user says | Mode | Start/message workers? |
 | --- | --- | --- |
