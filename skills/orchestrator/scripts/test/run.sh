@@ -173,6 +173,20 @@ expect "close: next claim is free" "$out" free
 expect "close: next claim shows the carry-over" "$out" '"carryOver":[{"id":"#8"'
 expect "close: plan moved to history" "$(ls "$HOME/.agents/orchestrator/history")" "acme-app-20261112-1200.json"
 
+# --- conflicting stacked PR: one filtered gh call marks it, with its base ---------------------
+sandbox
+plan_with "[$(item '#11' in-review w11 t11), $(item '#12' in-review w12 t12)]"
+ws w11 b-#11 "In Review"; ws w12 b-#12 "In Review"; snapshot w11 t11 idle
+echo x >"$FIX/screens/t11"
+cat >"$FIX/prs.json" <<'EOF2'
+[{"headRefName":"b-#11","number":21,"url":"u21","state":"OPEN","isDraft":false,"baseRefName":"b-#10","mergeable":"CONFLICTING"},
+ {"headRefName":"b-#12","number":22,"url":"u22","state":"OPEN","isDraft":false,"baseRefName":"main","mergeable":"MERGEABLE"}]
+EOF2
+out=$(status)
+expect "conflict: stacked PR is flagged" "$out" '"number":21,"url":"u21","state":"OPEN","isDraft":false,"conflicting":true,"base":"b-#10"'
+expect_not "conflict: mergeable PR is not" "$out" '"number":22,"url":"u22","state":"OPEN","isDraft":false,"conflicting"'
+expect "conflict: compact shows base" "$(status --compact)" "PR #21 OPEN CONFLICTING (base b-#10)"
+
 # --- wait-change prints one line --------------------------------------------------------------
 sandbox
 plan_with "[$(item '#10' in-progress w10 t10)]"
