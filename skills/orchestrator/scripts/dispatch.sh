@@ -7,13 +7,8 @@
 #             than the default makes the item stacked on that branch
 #   --preset  agent instance or preset id to start (default: the item's "agent")
 #
-# Steps, in order; a failing step stops the run. Nothing is written before the plan write.
-#   1. branch: issue-340-<slug>, eng-123-<slug> or task-<runId>-t1-<slug>; -2, -3, ... when the
-#      branch exists on origin, locally, in the plan or in a pull request
-#   2. plan: the item becomes in-progress with that branch (via plan.sh write)
-#   3. workspace: superset workspaces create with the worker prompt. If it fails, the item goes
-#      back to queued, or to blocked on the second failure (item.dispatchFailures), error as reason
-#   4. record: workspace, terminal and the branch Paradev reports go into the plan
+# Steps (branch, plan, workspace, record) are described in SKILL.md's Dispatch section; the first
+# failing one stops the run, and nothing is written before the plan write.
 # Prints one summary line on success, or "dispatch <id> failed at <step>: <reason>" and exit 1.
 # Works with bash 3.2 (no associative arrays) and zsh.
 set -euo pipefail

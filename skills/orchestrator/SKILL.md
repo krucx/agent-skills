@@ -14,9 +14,9 @@ each item gets its own worker, workspace, branch and PR. Coordinating is cheap: 
 picks a small or mid-sized model; elsewhere, if you're top-tier, say once in one line that a
 smaller one would do (`codex -m <small model>`, `gemini -m <flash model>`).
 
-`superset`, `paradev`, `pdev`: one CLI; this file writes `superset`, use whichever is on PATH;
-its `--help` is authoritative. `<skill-dir>`: this file's folder
-(usually `~/.agents/skills/orchestrator`). Run scripts inside the repo.
+`superset`, `paradev`, `pdev` are one CLI (this file writes `superset`; use whichever is on PATH;
+its `--help` is authoritative). `<skill-dir>` is this file's folder (usually
+`~/.agents/skills/orchestrator`). Run scripts inside the repo.
 
 ## Modes
 
@@ -33,7 +33,7 @@ All modes; stop with a clear message on failure:
 
 1. `bash`, `jq`, `git`, `gh`, CLI on PATH; `gh auth status`, `superset auth whoami --json` pass.
    `whoami` passes but host calls (`superset snapshot --json`) fail: retry with network/sandbox
-   escalation, then point the user to `superset:doctor`. Never start or restart the host yourself.
+   escalation, then point to `superset:doctor`. Never start or restart the host yourself.
 2. Repo on GitHub: `gh repo view --json nameWithOwner`.
 3. **Project ID**: repo-named project in `superset projects list --json`; scripts take it
    first, scoping them to its workspaces.
@@ -61,33 +61,18 @@ Say any takeover in one line. Write **only** via `plan.sh write <file>` (whole p
 file): it locks, refuses if another owns the run, stamps owner and heartbeat, swaps atomically.
 `plan.sh heartbeat` each watch cycle. `write`/`heartbeat` exit 3 (taken over): stop, tell the user.
 
-```json
-{"repo": "owner/repo", "runId": "20261112-2015", "status": "active", "maxParallel": 5,
- "autoApprove": true, "presets": {"claude": ["auto"]}, "autoOnly": {"claude": "accepted"}, "groups": {"In Progress": "in progress", "Blocked": "new group-6", …},
- "items": [{"id": "#340", "title": "…", "text": null, "dependsOn": [], "why": "",
- "skill": "implement", "agent": "claude", "preset": "auto", "state": "queued", "branch": null, "workspace": null, "terminal": null, "pr": null,
- "checked": null, "acceptance": null, "followUp": null}]}
-```
-
-`status` `active`|`finished`; `plan.sh` adds `owner`, `heartbeat`, `takenOverFrom`, `forcedAt`,
-`carryOver`. `state`: `queued`, `in-progress`, `in-review`, `feedback`, `done`, `blocked`,
-`waiting` (dependency failed), `skipped`; `reason` explains the last three. `text`: free-text
-task's description. `preset`: `auto`|`regular`. `presets`: per harness, which
-kinds [preflight](#worker-agents-and-auto-approval) found (`auto`, `regular`). `autoOnly`: per
-harness with only an auto instance, the user's answer (`"accepted"`, or `"declined"`); absent means
-not asked yet. `checked`: worker's `checked:` line.
-`acceptance`: `null`, `"ok"`, or the [gap](#acceptance-check). `followUp`: `null` or
-`{"after": "<ID>", "message": "<text>"}` ([after a merge](#follow-ups-after-a-merge)).
-`dispatchFailures`: set by `dispatch.sh` after a failed workspace creation.
+Schema and field meanings: [references/plan-schema.md](references/plan-schema.md). `state` values:
+`queued`, `in-progress`, `in-review`, `feedback`, `done`, `blocked`, `waiting` (dependency failed),
+`skipped`; `reason` explains the last three.
 
 Facts (workspace, branch, agent and PR state) come from Paradev and GitHub; intent (items,
 dependencies, skill, agent, why waiting/blocked/skipped) from the plan. Write the plan, then the
-tag, so an interruption leaves the plan ahead for reconcile to re-tag. Status tables come only
-from reconciled state.
+tag, so an interruption leaves the plan ahead for reconcile to re-tag. Status tables use only
+reconciled state.
 
 ## Groups
 
-Tags file workspaces into sidebar folders. Each workspace has exactly one; every `--tag` uses the
+Tags file workspaces into sidebar folders; each workspace has exactly one. Every `--tag` uses the
 group's tag from the plan's `groups` (lookups ignore case). Move by replacing:
 `superset workspaces update <id> --local --tag "<In Review's tag>"`.
 
@@ -159,16 +144,16 @@ the plan table.
 every item of that harness with the auto instance, and list the items the rules above would run
 with prompts (deployment, releases, infrastructure, credentials, real-data migrations, no write
 access, `with prompts`), each with its reason. Ask one question, in the same message as the go:
-run them with auto too, or hold them until a prompting preset exists? Store it in `autoOnly`
-(`accepted`: those items get `preset` `auto`; `declined`: they stay `queued`, reason "needs a
-prompting preset"), so Continue and later Runs don't ask again. With no such items, still note
-the case in one line and set `accepted`. A regular instance appearing later: Continue uses it for
-the items the rules name; `autoOnly` stays as recorded.
+run them with auto too, or hold them until a prompting preset exists? Store the answer in
+`autoOnly` (`accepted`: those items get `preset` `auto`; `declined`: they stay `queued`, reason
+"needs a prompting preset"); Continue and later Runs don't ask again. With no such items, still
+note the case in one line and set `accepted`. A regular instance appearing later: Continue uses
+it for the items the rules name; `autoOnly` stays as recorded.
 
-No auto instance for a harness: regular preset for its items; list each instance's `label`, `command`, `args`; offer once to
-create `Claude (auto)` (`claude --permission-mode auto`; Codex: `codex --approve-for-me`). Only on
-yes: with the CLI if `superset agents --help` offers it, else the user adds it in Paradev's agent
-settings.
+No auto instance for a harness: regular preset for its items; list each instance's `label`,
+`command`, `args`; offer once to create `Claude (auto)` (`claude --permission-mode auto`; Codex:
+`codex --approve-for-me`). Only on yes: with the CLI if `superset agents --help` offers it, else
+the user adds it in Paradev's agent settings.
 
 ## Dispatch
 
@@ -177,12 +162,12 @@ Start an item once each dependency has a PR (or is met) and fewer than the limit
 merge.
 
 **Squash-merge repos**: a stacked branch still carries its parent's original commits, so it
-conflicts once the parent squash-merges. Check once per run, with `gh repo view --json
+conflicts once the parent squash-merges. Check once per run with `gh repo view --json
 squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed` (and the base branch's ruleset, if
 `gh api` shows one restricting methods). When squash is the only method, don't stack: a dependent
-waits for its parent to merge, then starts on `main`. Exception: the user says the dependency is
-only a soft ordering, so start it on `main` at once. Otherwise stack, and the worker prompt
-carries the rebase recipe.
+waits for its parent to merge, then starts on `main`, unless the user says the dependency is only
+a soft ordering (then start it on `main` at once). Otherwise stack; the worker prompt carries the
+rebase recipe.
 
 Run `<skill-dir>/scripts/dispatch.sh <project-id> <plan-file> <ID> [--base <branch>] [--preset <id>]`
 inside the repo. It does the whole sequence and stops at the first failing step:
@@ -202,66 +187,13 @@ inside the repo. It does the whole sequence and stops at the first failing step:
 `--base`: the dependency's unmerged branch for a stacked item (the prompt gets the stacked line),
 else omit for the default branch. `--preset`: the auto instance ID or preset ID (default: the
 item's `agent`). Output: one `dispatched …` line, or `dispatch <ID> failed at <step>: …` (exit 1);
-if the failing step is `rollback` or `record`, fix the plan by hand before going on. Dispatch
-nothing by hand.
+after a `rollback` or `record` failure, fix the plan by hand before going on. Dispatch nothing by
+hand.
 
 ### Worker prompt
 
-What `dispatch.sh` sends; change it in the script.
-
-| Worker agent | First line |
-| --- | --- |
-| Claude, Hermes | `/<skill> <ID>` |
-| Codex | `$<skill> <ID>` |
-| Gemini, others | `Use the <skill> skill to do <ID>.` |
-
-`<task text>`: a free-text task's full `text`; tracker items drop it and the free-text line.
-Drop the stacked line if not stacked.
-
-```text
-<first line>
-
-<task text>
-
-You are one of several agents working on this repo in parallel, each in its own worktree. An
-orchestrator coordinates the run; the others are working on <other IDs>.
-- Free text: <ID> is a label in this run's plan only (T1, T2, …), not a tracker ticket. The
-  task is the text above; don't fetch <ID> from any tracker.
-- Stay within <ID>. Don't make drive-by changes elsewhere: other branches are editing this code
-  at the same time.
-- Keep shared machine resources apart from the other workers: put <branch> in Docker Compose
-  project names, container names, scratch or data directories and temp files, and don't bind
-  fixed host ports that another worker might also use.
-- Stacked: this branch starts from <branch> (PR #<m>, not merged yet). Say "Stacked on #<m>;
-  merge that first" in your PR description. Note the parent tip now (`git rev-parse HEAD` before
-  your first commit). When #<m> merges, run `git fetch origin && git rebase --onto origin/main
-  <that tip> HEAD`, then `git push --force-with-lease`,
-  and delete the "merge that first" line from the PR description (a squash-merge leaves the
-  parent's commits on your branch, so the PR conflicts until you do).
-- Your goal is an open pull request. When the work is committed, push the branch and open the
-  PR yourself (`gh pr create`), even if your skill stops at a commit. If you need a decision
-  from a human, ask it plainly and stop.
-- You are done when the PR's checks have finished and it is mergeable, not when it is open.
-  Before printing ORCHESTRATOR_WORKER_DONE, run `gh pr checks <n> --watch --fail-fast` and read
-  only its exit code and the names of failed checks. For a failed check, tail
-  `gh run view <run-id> --log-failed` (never fetch logs of green checks), fix what your change
-  caused, push, and watch again. Then confirm the base is not conflicting: `gh pr view <n>
-  --json mergeable,mergeStateStatus,statusCheckRollup --jq '{mergeable, mergeStateStatus,
-  failing: [.statusCheckRollup[] | select(.conclusion=="FAILURE") | .name]}'`. On a conflict,
-  merge or rebase the base and push. A check you cannot fix goes in `checked:` by name.
-- Finish your last message with exactly one of:
-  ORCHESTRATOR_WORKER_DONE
-  item: <ID>
-  pr: <url>
-  summary: <one line>
-  checked: <what you verified against the task, and the PR's checks in a few words ("5/5
-    green"); name only the checks that were red or skipped>
-  or
-  ORCHESTRATOR_WORKER_BLOCKED
-  item: <ID>
-  reason: <what stops you>
-  needs: <the decision or access required>
-```
+`dispatch.sh` builds and sends it; change it in the script. Contents and the
+DONE/BLOCKED report format: [references/worker-prompt.md](references/worker-prompt.md).
 
 ## Reconcile
 
@@ -362,9 +294,9 @@ with "say 'orchestrator continue' to start them".
 ## Close
 
 `plan.sh claim` as in Continue (`free`: nothing to close), reconcile, write the plan, then
-`plan.sh close`: `finished` now,
-open items saved as `carryOver` (`{id, state, reason}`), offered on the next Run. Print the final
-table and the carry-over; stop the waiter. Workspaces stay as they are.
+`plan.sh close`: `finished` now, open items saved as `carryOver` (`{id, state, reason}`), offered
+on the next Run. Print the final table and the carry-over; stop the waiter. Workspaces stay as
+they are.
 
 ## Status table
 
