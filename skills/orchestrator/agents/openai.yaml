@@ -1,4 +1,4 @@
 interface:
   display_name: "Orchestrator"
-  short_description: "Drive tracker issues or free-text tasks to PRs in parallel Paradev workers, with a resumable plan (ad-hoc fan-outs: superset:orchestrate)"
+  short_description: "Drive tracker issues, an epic ("feature #400") or free-text tasks to PRs in parallel Paradev workers, with a resumable plan (ad-hoc fan-outs: superset:orchestrate)"
   default_prompt: "Use $orchestrator to orchestrate issues 340-343."

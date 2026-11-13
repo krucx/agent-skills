@@ -14,6 +14,8 @@ case "$1 ${2:-}" in
   "pr view") cat "$FIX/pr-view.json" ;;
   "pr merge") echo "$*" >"$FIX/merge.args" ;;
   "repo view") echo acme/app ;;
+  "issue view") cat "$FIX/epic.json" ;;
+  "api repos/acme/app/issues/"*"/sub_issues") cat "$FIX/sub-issues.json" ;;
   "api repos/acme/app/rules/branches/"*) cat "$FIX/rules.json" 2>/dev/null || echo '[]' ;;
   *) echo "gh shim: unsupported: $*" >&2; exit 1 ;;
 esac
