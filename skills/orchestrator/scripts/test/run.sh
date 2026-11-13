@@ -113,6 +113,17 @@ expect "worker: marker" "$out" '"marker":"done"'
 expect "worker: wrapped checked rejoined" "$out" '"checked":"ran the export on the sample data and compared it with the fixture"'
 expect "worker: compact shows checked" "$(status --compact)" "worker done, checked: ran the export"
 
+# --- worker block: the prompt's placeholder template is not a report --------------------------
+sandbox
+plan_with "[$(item '#13' in-progress w13 t13)]"
+ws w13 b-#13 "In Progress"; snapshot w13 t13 working
+printf '%s\n' "Finish your last message with exactly one of:" "ORCHESTRATOR_WORKER_BLOCKED" "item: #13" "reason: <what stops you>" "needs: <the decision or access required>" "" >"$FIX/screens/t13"
+out=$(status)
+expect "placeholder: template block is not a worker result" "$out" '"worker":null'
+printf '%s\n' "ORCHESTRATOR_WORKER_BLOCKED" "item: #13" "reason: <what stops you>" "needs: <the decision or access required>" "" "Working..." "ORCHESTRATOR_WORKER_BLOCKED" "item: #13" "reason: no push access" "needs: write access to the repo" "" >"$FIX/screens/t13"
+out=$(status)
+expect "placeholder: a real block after the template is detected" "$out" '"reason":"no push access"'
+
 # --- worker replaced: terminal differs from the plan's ---------------------------------------
 sandbox
 plan_with "[$(item '#4' in-progress w4 t-old)]"
