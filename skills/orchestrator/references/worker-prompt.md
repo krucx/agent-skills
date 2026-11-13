@@ -1,47 +1,37 @@
 # Worker prompt
 
-What `dispatch.sh` sends; change it in the script.
+Built and sent by `dispatch.sh` (exact wording there). First line: Claude, Hermes `/<skill> <ID>`;
+Codex `$<skill> <ID>`; others `Use the <skill> skill to do <ID>.` Then, in order:
 
-| Worker agent | First line |
-| --- | --- |
-| Claude, Hermes | `/<skill> <ID>` |
-| Codex | `$<skill> <ID>` |
-| Gemini, others | `Use the <skill> skill to do <ID>.` |
-
-After the first line the prompt carries, in this order (exact wording lives in `dispatch.sh`):
-
-- a free-text task's `ask` under a label marking it as the user's verbatim words and the whole
-  scope, then its `notes`, if any, under a label marking them as context that adds no work; an
-  older plan's task with only `text` gets that text unlabelled; tracker items get neither
-  (`extras` never reaches the worker);
-- one of several agents in parallel worktrees, the others being <other IDs>;
-- free text only: `<ID>` is a plan label, not a tracker ticket; with an `ask`, build nothing
-  beyond the user's words;
-- stay within `<ID>`, no drive-by changes; put `<branch>` in Docker Compose project names,
-  container names, scratch or data directories and temp files, and bind no fixed host ports;
-- stacked only: the branch starts from `<branch>` (PR #<m>, unmerged); say "Stacked on #<m>; merge
-  that first" in the PR description; note the parent tip before the first commit; after #<m>
-  merges, `git fetch origin && git rebase --onto origin/main <that tip> HEAD`, `git push
-  --force-with-lease`, and delete the "merge that first" line (a squash-merge leaves the parent's
-  commits on the branch, so the PR conflicts until then);
-- the goal is an open PR: push and `gh pr create` even if the skill stops at a commit; ask a
-  human decision plainly and stop;
-- the same obstacle a second time (the same failing command or the same missing access) means
-  stop, not retry: print `ORCHESTRATOR_WORKER_BLOCKED` with `reason:` naming the obstacle and
-  `needs:` what would clear it; once the PR is open, a PR check it can't fix is not an obstacle
-  and goes in `checked:` (a block after the PR exists would land the item in `in-review`);
+- free text: the `ask`, labelled as the user's verbatim words and the whole scope, then any
+  `notes`, labelled as context adding no work (older plan: `text`, unlabelled); tracker items get
+  neither; `extras` never reach the worker;
+- one of several agents in parallel worktrees; the others' IDs;
+- free text only: `<ID>` is a plan label, not a tracker ticket; with an `ask`, build nothing beyond
+  the user's words;
+- stay within `<ID>`, no drive-by changes; `<branch>` in Docker Compose project and container
+  names, scratch/data dirs and temp files; no fixed host ports;
+- stacked only: starts from `<branch>` (PR #<m>, unmerged); "Stacked on #<m>; merge that first" in
+  the PR description; note the parent tip before the first commit; after #<m> merges,
+  `git fetch origin && git rebase --onto origin/main <that tip> HEAD`, `git push
+  --force-with-lease`, delete the "merge that first" line (squash-merge leaves the parent's commits,
+  so the PR conflicts until then);
+- the goal is an open PR: push and `gh pr create` even if the skill stops at a commit; ask a human
+  decision plainly and stop;
+- the same obstacle twice (same failing command or missing access): stop, print BLOCKED with
+  `reason:` the obstacle, `needs:` what clears it; once the PR is open, an unfixable PR check is
+  not an obstacle but goes in `checked:` (a block after the PR exists would land in `in-review`);
 - before ending a turn with its own background work running (e.g. code-review subagents), or
-  while waiting on something external that clears by itself, print `ORCHESTRATOR_WORKER_WAITING`
-  (below) once per wait, never on every poll or during active implementation. Waiting is not
-  blocked: a wait clears on its own, a block needs the orchestrator or the user; what it waits on
-  failing is an obstacle as above. A later DONE or BLOCKED block replaces the wait;
-- done means the PR's checks have finished and it is mergeable: `gh pr checks <n> --watch
-  --fail-fast` (read the exit code and failed check names only), tail `gh run view <run-id>
-  --log-failed` for a failure (never green logs), fix, push, watch again; then confirm
-  `gh pr view <n> --json mergeable,mergeStateStatus,statusCheckRollup`, merging or rebasing the
-  base on a conflict; a check that can't be fixed goes in `checked:` by name;
-- the last message ends with exactly one of these, the marker on a line of its own (`status.sh`
-  ignores a marker mid-sentence, so the prompt's own mentions are not read as reports):
+  waiting on something external that clears itself: print the WAITING block once per wait, never
+  per poll or while implementing. Waiting is not blocked (a block needs the orchestrator or user);
+  what it waits on failing is an obstacle; a later DONE/BLOCKED block replaces the wait;
+- done = PR checks finished and mergeable: `gh pr checks <n> --watch --fail-fast` (exit code and
+  failed names only), tail `gh run view <run-id> --log-failed` on failure (never green logs), fix,
+  push, re-watch; confirm `gh pr view <n> --json mergeable,mergeStateStatus,statusCheckRollup`,
+  merging or rebasing the base on conflict; an unfixable check goes in `checked:` by name;
+- end the last message with exactly one block, the marker on its own line (`status.sh` ignores
+  mid-sentence markers and blocks still holding `<placeholders>`, so the prompt's own templates
+  aren't read as reports):
 
 ```text
 ORCHESTRATOR_WORKER_DONE
@@ -59,9 +49,9 @@ reason: <what stops you>
 needs: <the decision or access required>
 ```
 
-The wait block (not a final report; `status.sh` shows it as marker `waiting` with `waitingOn` and
-`resumesWhen`, and the orchestrator skips the worker while it is the latest block; the same wait
-still latest after 30 minutes is `stale` and gets a screen check instead):
+WAITING (not a final report): `status.sh` shows marker `waiting` with `waitingOn`/`resumesWhen`;
+the orchestrator skips the worker while it's the latest block; still latest after 30 minutes =
+`stale`, which gets a screen check instead.
 
 ```text
 ORCHESTRATOR_WORKER_WAITING

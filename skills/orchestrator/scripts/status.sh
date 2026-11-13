@@ -1,37 +1,33 @@
 #!/usr/bin/env bash
-# Print one JSON object per workspace the orchestrator should know about: every workspace in
-# the plan, plus every workspace of this project carrying a group tag.
+# Print one JSON object per workspace the orchestrator should know about: every plan workspace,
+# plus every workspace of this project carrying a group tag.
 #
-# Usage: status.sh [--compact] <project-id> [plan-file]   (run inside the repo the PRs belong to)
+# Usage: status.sh [--compact] <project-id> [plan-file]   (inside the repo the PRs belong to)
 #
 # Fields:
-#   id, name, branch       the workspace as Paradev has it now (branch may differ from the plan)
-#   item                   the plan item using this workspace, or null
-#   group                  its logical group (In Progress, In Review, Done, Blocked; tags mapped
-#                          by the plan's "groups", else groups.sh), or null
-#   inPlan                 true when the plan lists this workspace ID
-#   missing                true when the plan lists it but Paradev no longer has it
-#   agent                  {terminal, id, state, reason}; state is working | idle | blocked | none,
-#                          or, for plan workspaces, from the tail of the screen:
-#                            blocked  a fatal banner (usage or rate limit, quota, context window,
-#                                     expired sign-in) is in the last 20 lines and no worker
-#                                     block is; reason is that line
-#                            stalled  Paradev says working but the screen hasn't changed for
-#                                     STALL_MINUTES (default 15)
-#   worker                 the last ORCHESTRATOR_WORKER_DONE/BLOCKED/WAITING block on screen as
-#                          {marker, item, pr, summary, checked, reason, needs, waitingOn,
-#                          resumesWhen}, or null; marker "waiting" is a declared wait (busy, not
-#                          done), and a later DONE or BLOCKED block replaces it; the same wait
-#                          still latest after WAIT_MINUTES (default 30) also has "stale": true and
-#                          "staleMinutes", so the orchestrator checks the screen instead of skipping
-#   pr                     newest PR for the branch {number,url,state,isDraft}, or null; an open
-#                          PR GitHub reports CONFLICTING also has "conflicting": true and
-#                          "base" (its base branch), from one filtered `gh pr list` for all PRs
+#   id, name, branch  the workspace as Paradev has it now (branch may differ from the plan)
+#   item              the plan item using it, or null
+#   group             In Progress | In Review | Done | Blocked (tags mapped by the plan's
+#                     "groups", else groups.sh), or null
+#   inPlan            the plan lists this workspace ID
+#   missing           the plan lists it but Paradev no longer has it
+#   agent             {terminal, id, state, reason}; state: working | idle | blocked | none, or, for
+#                     plan workspaces, from the screen's tail:
+#                       blocked  a fatal banner (usage/rate limit, quota, context window, expired
+#                                sign-in) in the last 20 lines, with no worker block; reason = it
+#                       stalled  Paradev says working, screen unchanged for STALL_MINUTES (15)
+#   worker            the last ORCHESTRATOR_WORKER_DONE/BLOCKED/WAITING block on screen as {marker,
+#                     item, pr, summary, checked, reason, needs, waitingOn, resumesWhen}, or null.
+#                     marker "waiting" = a declared wait (busy, not done); a later DONE/BLOCKED
+#                     replaces it; still latest after WAIT_MINUTES (30) it adds "stale": true and
+#                     "staleMinutes", so the orchestrator checks the screen instead of skipping
+#   pr                newest PR for the branch {number,url,state,isDraft}, or null; an open PR
+#                     GitHub calls CONFLICTING adds "conflicting": true and "base" (its base branch)
 #
-# --compact prints one short line per workspace instead, for watch cycles; it adds "branch <b>" or
-# "terminal <t>" only when they differ from the plan's.
-# Screen hashes live in ~/.agents/orchestrator/screens/<plan's runId, else project>.json.
-# gh and Paradev list calls are retried 3 times, RETRY_DELAY (default 5) seconds apart, doubling.
+# --compact: one short line per workspace, for watch cycles, adding "branch <b>" or "terminal <t>"
+# only when they differ from the plan's.
+# Screen hashes: ~/.agents/orchestrator/screens/<plan's runId, else project>.json.
+# gh and Paradev list calls retry 3 times, RETRY_DELAY (5) seconds apart, doubling.
 set -euo pipefail
 
 compact=''

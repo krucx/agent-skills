@@ -333,7 +333,7 @@ expect "dispatch: plan records workspace, terminal, branch" "$(plan_item)" \
 args=$(cat "$FIX/create.args")
 expect "dispatch: tag comes from the plan's groups" "$args" $'--tag\nwip'
 expect "dispatch: prompt starts with the skill" "$args" "/implement #20"
-expect "dispatch: prompt names the other items" "$args" "the others are working on #21."
+expect "dispatch: prompt names the other items" "$args" "the others work on #21."
 expect "dispatch: prompt stops on the same obstacle twice" "$args" "If you hit the same obstacle a second time"
 expect "dispatch: an unfixable PR check is not an obstacle" "$args" "a PR check you cannot fix is not an obstacle"
 expect "dispatch: prompt defines the wait block" "$args" "ORCHESTRATOR_WORKER_WAITING"
