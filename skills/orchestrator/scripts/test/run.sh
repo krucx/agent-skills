@@ -390,6 +390,30 @@ expect "stacked: prompt says stacked" "$(cat "$FIX/create.args")" "Stacked: this
 dispatch_sandbox
 plan_with "[$(jq -nc '{id: "T1", title: "Cache the thing", text: "Add a cache.", state: "queued", branch: null}')]"
 expect "free text: task-<runId>-t1-<slug>" "$("$scripts/dispatch.sh" proj "$plan" T1 2>&1)" "-> task-20261112-1200-t1-cache-the-thing "
+args=$(cat "$FIX/create.args")
+expect "old single-text plan: prompt carries the text" "$args" $'/implement T1\n\nAdd a cache.\n'
+expect "old single-text plan: still a plan label" "$args" "T1 is a label in this run's plan only"
+
+# free text with the user's words and the orchestrator's notes kept apart
+dispatch_sandbox
+plan_with "[$(jq -nc '{id: "T2", title: "Cache the thing", ask: "cache the search results",
+  notes: "Lives in search/. Out of scope: the image cache.", state: "queued", branch: null}')]"
+out=$("$scripts/dispatch.sh" proj "$plan" T2 2>&1)
+expect "two-part: free-text branch name" "$out" "-> task-20261112-1200-t2-cache-the-thing "
+args=$(cat "$FIX/create.args")
+expect "two-part: the user's words under their own label" "$args" \
+  $'The user\'s words (verbatim; this is the task and the whole of its scope):\ncache the search results\n'
+expect "two-part: the notes under their own label" "$args" \
+  $'Orchestrator\'s notes (context and what stays out of scope; they add no work):\nLives in search/. Out of scope: the image cache.\n'
+expect "two-part: still a plan label" "$args" "T2 is a label in this run's plan only"
+plan_with "[$(jq -nc '{id: "T3", title: "Fix login", ask: "fix the login redirect", notes: null, state: "queued", branch: null}')]"
+"$scripts/dispatch.sh" proj "$plan" T3 >/dev/null 2>&1
+args=$(cat "$FIX/create.args")
+expect "two-part: words alone when there are no notes" "$args" $'fix the login redirect\n'
+expect_not "two-part: no empty notes label" "$args" "Orchestrator's notes"
+dispatch_sandbox
+dispatch >/dev/null 2>&1
+expect_not "tracker item: no user's-words label" "$(cat "$FIX/create.args")" "The user's words"
 
 # zsh too, when installed
 if command -v zsh >/dev/null; then

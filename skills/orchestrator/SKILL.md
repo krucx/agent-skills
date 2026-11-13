@@ -108,8 +108,12 @@ Steps 1–3 only for tracker refs (free-text-only runs start at 4).
 3. **Fetch** expanded items' title, body, labels, author. Drop closed ones, pull requests, ones
    with an open PR or already planned; `skipped`: `needs-info`/`needs-triage` labels or too
    vague. Name each dropped/skipped item and why.
-4. **Free text → tasks** `T1`, `T2`, … (one reviewable PR each; title, full text,
-   dependencies). Show them; **wait for the go** (biggest judgment call), asking only that.
+4. **Free text → tasks** `T1`, `T2`, … (one reviewable PR each; title, dependencies). Each
+   task keeps two parts: `ask`, the slice of the user's request it covers, **verbatim** (never
+   reworded or widened), and `notes`, your build notes (context, what stays out of scope), adding
+   no work. Anything you'd add beyond the ask (hardening, a sweep, a broader goal) goes in
+   `extras`, not `notes`. Show each task with its `ask` quoted in full; **wait for the go**
+   (biggest judgment call), asking only that.
    Tasks stay plan-only; after the go, separately (never in one question), offer once to file
    them; file only on yes.
 5. **Dependencies**: explicit ("blocked by", "depends on", "after", parent/child) and conflicts
@@ -262,14 +266,16 @@ it, drop it ("start #345 anyway") or skip dependents. Recovered: `waiting` depen
 
 ### Acceptance check
 
-Once per item, before `in-review`: compare `checked` with the issue's acceptance criteria and the
-PR's files (`gh pr view <n> --json files -q '.files[].path'`: names and counts, never code). If it
+Once per item, before `in-review`: compare `checked` with the issue's acceptance criteria (a
+free-text task: its `ask` only, never `notes` or `extras`; an older plan's `text`) and the PR's
+files (`gh pr view <n> --json files -q '.files[].path'`: names and counts, never code). If it
 plainly covers less (whole file groups unmentioned, e.g. 4 of 24 screenshots, or criteria
 unaddressed), or `checked` says nothing about the PR's checks (CI not mentioned, or "not
 checked"), send ONE follow-up naming the gap (for CI: wait for `gh pr checks <n> --watch
 --fail-fast` and report the result): `feedback`, reason "acceptance follow-up",
 `acceptance` the gap. Else `acceptance` "ok". Never a second round; a gap left is noted under the
-table for the human.
+table for the human. Work the PR lacks that the `ask` never asked for is not a gap: never send it to
+the worker; keep it in `extras` and note it under the table as possible follow-up work.
 
 ### Follow-ups after a merge
 
@@ -343,5 +349,5 @@ One row per run item, plan order:
 `Agent`: `running`, `waiting` (a declared wait), `stalled`, `waiting for input` (Paradev
 `blocked`, or it asked), `done` (`idle`), `—`. `Group`: sidebar group, `Queued (after <ID>)`, `Waiting (<reason>)`, `Skipped`.
 Below it only: worker questions, `Blocked` reasons, stalls, dependency decisions, closed PRs,
-missing workspaces, acceptance gaps, a just-in-review item's `checked`
+missing workspaces, acceptance gaps, possible follow-ups (`extras`), a just-in-review item's `checked`
 ("#340 checked: ran the CI workflow on a fork; Pester cache hit on the second run").
