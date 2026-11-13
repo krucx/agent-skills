@@ -8,7 +8,8 @@
  "checked": null, "acceptance": null, "followUp": null}]}
 ```
 
-`status`: `active`|`finished`; `plan.sh` adds `owner`, `heartbeat`, `takenOverFrom`, `forcedAt`,
+`status`: `active`|`finished`; `pageId`: the run-summary page's ID once published (absent: none; later
+[summaries](../SKILL.md#run-summary) pass it as `--page` to add a version); `plan.sh` adds `owner`, `heartbeat`, `takenOverFrom`, `forcedAt`,
 `carryOver`. `state` and `reason`: see SKILL.md. `text`: a free-text
 task's description. `preset`: `auto`|`regular`. `presets`: per harness, the kinds
 [preflight](../SKILL.md#worker-agents-and-auto-approval) found. `autoOnly`: per harness with only an auto
