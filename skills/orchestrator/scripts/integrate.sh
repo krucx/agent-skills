@@ -40,7 +40,7 @@ case ${1:-} in
       { echo "$f is not ready for $f-integrate" >&2; exit 1; }
     tmp=$(mktemp "${TMPDIR:-/tmp}/integrate.XXXXXX")
     trap 'rm -f "$tmp"' EXIT
-    jq --arg f "$f" '.integrations[] | select(.id == $f) as $i
+    jq --arg f "$f" '(.integrations[] | select(.id == $f)) as $i
       | .items += [{id: "\($f)-integrate", title: "Integrate \($i.title)", integrates: $f, integration: null,
           dependsOn: [], skill: ([.items[] | select(.integration == $f) | .skill][0] // "implement"),
           agent: ([.items[] | select(.integration == $f) | .agent][0] // "claude"),

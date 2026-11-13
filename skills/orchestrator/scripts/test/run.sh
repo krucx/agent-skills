@@ -456,6 +456,51 @@ expect "no integration: stacked rebases onto main" "$args" "git rebase --onto or
 expect "no integration: PR targets main" "$args" 'gh pr create --base main'
 expect "prompt: no PR checks means a local test run in checked:" "$args" "no PR checks; local: npm"
 
+# --- integrate: when an integration is ready, held, and its dispatched item -------------------
+integ_items() { # integ_items <state-of-#1> <state-of-#2> [dropped-of-#2]
+  plan_with "[$(jq -nc --arg s "$1" '{id: "#1", title: "One", state: $s, integration: "F1", pr: "https://github.com/acme/app/pull/5", skill: "implement", agent: "claude"}'),
+    $(jq -nc --arg s "$2" --argjson d "${3:-false}" '{id: "#2", title: "Two", state: $s, integration: "F1", pr: "https://github.com/acme/app/pull/6", dropped: $d}')]" \
+    '{"integrations": [{"id": "F1", "title": "CSV", "branch": "feature/csv", "base": "main", "pr": null, "state": "open"}]}'
+}
+integ() { "$scripts/integrate.sh" "$1" "$plan" "${2:-}" 2>&1; }
+dispatch_sandbox
+integ_items done in-review
+expect "integrate: an item in review keeps it open" "$(integ check)" "open F1: #2"
+integ_items done done
+expect "integrate: all done is ready" "$(integ check)" "ready F1"
+integ_items done blocked
+expect "integrate: a blocked item holds it" "$(integ check)" "held F1: #2 blocked"
+integ_items done waiting
+expect "integrate: a waiting item holds it" "$(integ check)" "held F1: #2 waiting"
+integ_items done skipped
+expect "integrate: a skipped item holds it" "$(integ check)" "held F1: #2 skipped"
+integ_items done skipped true
+expect "integrate: a dropped item releases it" "$(integ check)" "ready F1"
+integ_items skipped skipped true
+jq '.items[0].dropped = true' "$plan" >"$plan.t" && mv "$plan.t" "$plan"
+expect "integrate: all dropped is empty" "$(integ check)" "empty F1"
+integ_items done blocked
+integ add F1 >/dev/null; code=$?
+expect_exit "integrate: add refuses a held integration" "$code" 1
+expect_not "integrate: and adds nothing" "$(jq -r '[.items[].id] | join(",")' "$plan")" "F1-integrate"
+integ_items done skipped true
+expect "integrate: add queues the item" "$(integ add F1)" "added F1-integrate"
+expect "integrate: the item is queued and integrates F1" \
+  "$(jq -c '.items[] | select(.id == "F1-integrate") | [.state, .integrates, .integration]' "$plan")" '["queued","F1",null]'
+expect "integrate: once added, check says has" "$(integ check)" "has F1: F1-integrate is queued"
+git push -q origin HEAD:refs/heads/main; git push -q origin HEAD:refs/heads/feature/csv
+out=$("$scripts/dispatch.sh" proj "$plan" F1-integrate 2>&1)
+expect "integrate dispatch: item dispatches" "$out" "dispatched F1-integrate -> f1-integrate-integrate-csv "
+args=$(cat "$FIX/create.args")
+expect "integrate dispatch: starts from the feature branch" "$args" $'--base-branch\nfeature/csv'
+expect "integrate dispatch: merges main in" "$args" "git merge origin/main"
+expect "integrate dispatch: opens feature to main" "$args" "gh pr create --base main --head feature/csv"
+expect "integrate dispatch: lists the sub-PRs" "$args" "#1 One: https://github.com/acme/app/pull/5"
+expect "integrate dispatch: names dropped items" "$args" "#2 Two: https://github.com/acme/app/pull/6 (dropped, not included)"
+expect "integrate dispatch: leaves the merge to the user" "$args" "Do not merge the final PR"
+expect_not "integrate dispatch: not stacked" "$args" "Stacked:"
+expect "integrate dispatch: worker prompt still ends in a DONE block" "$args" "ORCHESTRATOR_WORKER_DONE"
+
 # --- merge gate --------------------------------------------------------------------------------
 gate_sandbox() { # gate_sandbox <checked> [acceptance]
   sandbox

@@ -86,7 +86,7 @@ fi
 
 # --- 1. branch ------------------------------------------------------------------------------
 lower=$(printf '%s' "$id" | tr 'A-Z' 'a-z')
-if [[ -n $task || $lower == t[0-9]* ]]; then prefix="task-$run-$lower"
+if [[ (-n $task && -z $integrates) || $lower == t[0-9]* ]]; then prefix="task-$run-$lower"
 elif [[ $lower == \#* ]]; then prefix="issue-${lower#\#}"
 else prefix=$lower; fi
 slug=$(printf '%s' "$title" | tr 'A-Z' 'a-z' | LC_ALL=C sed 's/[^a-z0-9]\{1,\}/ /g' |
