@@ -454,6 +454,72 @@ dispatch --base issue-19-dep >/dev/null 2>&1
 args=$(cat "$FIX/create.args")
 expect "no integration: stacked rebases onto main" "$args" "git rebase --onto origin/main <that tip>"
 expect "no integration: PR targets main" "$args" 'gh pr create --base main'
+expect "prompt: no PR checks means a local test run in checked:" "$args" "no PR checks; local: npm"
+
+# --- merge gate --------------------------------------------------------------------------------
+gate_sandbox() { # gate_sandbox <checked> [acceptance]
+  sandbox
+  plan_with "[$(jq -nc --arg c "$1" --arg a "${2-ok}" '{id: "#30", state: "in-review", integration: "F1", pr: "https://github.com/acme/app/pull/9", checked: $c, acceptance: $a}'),
+    $(jq -nc '{id: "#31", state: "in-review", pr: "https://github.com/acme/app/pull/10", checked: "5/5 green", acceptance: "ok"}')]" \
+    '{"integrations": [{"id": "F1", "branch": "feature/csv", "base": "main", "state": "open"}]}'
+  pr_view OPEN feature/csv MERGEABLE '[{"name":"ci","conclusion":"SUCCESS"}]'
+}
+pr_view() { jq -n --arg s "$1" --arg b "$2" --arg m "$3" --argjson r "$4" \
+  '{state: $s, baseRefName: $b, mergeable: $m, statusCheckRollup: $r}' >"$FIX/pr-view.json"; }
+gate() { "$scripts/merge.sh" "${1:-check}" "$plan" "${2:-#30}" 2>&1; }
+
+gate_sandbox "5/5 green"
+expect "gate: green, mergeable, acceptance ok merges" "$(gate)" "merge"
+expect_exit "gate: merge exits 0" "$(gate >/dev/null; echo $?)" 0
+gate run >/dev/null
+expect "gate run: merges with a merge commit" "$(cat "$FIX/merge.args")" "pr merge 9 --merge"
+gate_sandbox "5/5 green"; pr_view OPEN main MERGEABLE '[{"name":"ci","conclusion":"SUCCESS"}]'
+expect "gate: a PR into the default branch is never merged" "$(gate)" "no: PR #9 targets main"
+gate run >/dev/null; expect "gate run: and gh pr merge is not called" "$(cat "$FIX/merge.args" 2>/dev/null)" ""
+expect "gate: an item without integration is never merged" "$(gate check '#31')" "no: #31 targets the default branch"
+gate_sandbox "5/5 green" "missing the docs"
+expect "gate: an acceptance gap is not merged" "$(gate)" "no: acceptance is not ok"
+gate_sandbox ""
+expect "gate: no DONE block is not merged" "$(gate)" "no: no DONE block"
+gate_sandbox "5/5 green"; pr_view OPEN feature/csv CONFLICTING '[{"name":"ci","conclusion":"SUCCESS"}]'
+expect "gate: a conflict waits" "$(gate)" "wait: PR #9 conflicts"
+expect_exit "gate: wait exits 2" "$(gate >/dev/null; echo $?)" 2
+pr_view OPEN feature/csv UNKNOWN '[{"name":"ci","conclusion":"SUCCESS"}]'
+expect "gate: unknown mergeability waits" "$(gate)" "wait: PR #9 mergeability unknown"
+pr_view OPEN feature/csv MERGEABLE '[{"name":"ci","conclusion":"SUCCESS"},{"name":"lint","status":"IN_PROGRESS","conclusion":null}]'
+expect "gate: pending checks wait" "$(gate)" "wait: checks still running"
+pr_view OPEN feature/csv MERGEABLE '[{"name":"ci","conclusion":"SUCCESS"},{"name":"lint","conclusion":"FAILURE"}]'
+expect "gate: red checks wait, naming them" "$(gate)" "wait: checks red: lint"
+pr_view OPEN feature/csv MERGEABLE '[{"name":"ci","conclusion":"SKIPPED"},{"name":"lint","conclusion":"NEUTRAL"}]'
+expect "gate: skipped and neutral checks are green" "$(gate)" "merge"
+pr_view MERGED feature/csv MERGEABLE '[]'
+expect "gate: a PR that is not open is not merged" "$(gate)" "no: PR #9 is not open"
+gate_sandbox "no PR checks; local: npm test passed"; pr_view OPEN feature/csv MERGEABLE '[]'
+expect "gate: no checks and a passing local run merges" "$(gate)" "merge"
+gate_sandbox "no PR checks"; pr_view OPEN feature/csv MERGEABLE '[]'
+expect "gate: no checks and no local run gets a follow-up" "$(gate)" "followup:"
+expect_exit "gate: follow-up exits 3" "$(gate >/dev/null; echo $?)" 3
+gate run >/dev/null; expect "gate run: no merge on a follow-up" "$(cat "$FIX/merge.args" 2>/dev/null)" ""
+gate_sandbox "no PR checks; local: npm test failed, 2 red"; pr_view OPEN feature/csv MERGEABLE '[]'
+expect "gate: no checks and a failing local run gets a follow-up" "$(gate)" "followup:"
+gate_sandbox "no PR checks; npm test passed"; pr_view OPEN feature/csv MERGEABLE '[]'
+expect "gate: a test run not marked local gets a follow-up" "$(gate)" "followup:"
+
+# --- rulesets of the integration branch -------------------------------------------------------
+sandbox
+echo '[]' >"$FIX/rules.json"
+expect "rules: none means ok" "$("$scripts/merge.sh" rules feature/csv)" "ok"
+echo '[{"type":"pull_request","parameters":{"allowed_merge_methods":["squash","rebase"]}}]' >"$FIX/rules.json"
+out=$("$scripts/merge.sh" rules feature/csv)
+expect "rules: squash/rebase only forbids merge commits" "$out" "no-merge-commit:"
+expect_not "rules: and is not ok" "$out" $'
+ok'
+echo '[{"type":"required_linear_history"}]' >"$FIX/rules.json"
+expect "rules: linear history forbids merge commits" "$("$scripts/merge.sh" rules feature/csv)" "no-merge-commit:"
+echo '[{"type":"pull_request","parameters":{"allowed_merge_methods":["merge","squash"]}}]' >"$FIX/rules.json"
+expect "rules: merge allowed is ok" "$("$scripts/merge.sh" rules feature/csv)" "ok"
+echo '[{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":true}}]' >"$FIX/rules.json"
+expect "rules: up-to-date requirement is reported" "$("$scripts/merge.sh" rules feature/csv)" "strict:"
 
 # zsh too, when installed
 if command -v zsh >/dev/null; then

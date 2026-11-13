@@ -170,7 +170,9 @@ others=$(jq -r --arg id "$id" '[.items[] | select(.id != $id) | .id] | join(", "
     "  \`gh pr view <n> --json mergeable,mergeStateStatus,statusCheckRollup --jq '{mergeable," \
     "  mergeStateStatus, failing: [.statusCheckRollup[] | select(.conclusion==\"FAILURE\") | .name]}'\`;" \
     "  on a conflict merge or rebase the base and push. A check you cannot fix goes in \`checked:\`" \
-    "  by name." \
+    "  by name. If the PR has no checks at all (common on PRs into a feature branch), run the" \
+    "  project's test command locally and report it in \`checked:\`, e.g. \"no PR checks; local: npm" \
+    "  test passed\"; the orchestrator merges a PR into an integration branch only on that." \
     "- Finish your last message with exactly one of these, the marker on a line of its own:" \
     "  ORCHESTRATOR_WORKER_DONE" "  item: $id" "  pr: <url>" "  summary: <one line>" \
     "  checked: <what you verified against the task, and the PR's checks in a few words (\"5/5" \
