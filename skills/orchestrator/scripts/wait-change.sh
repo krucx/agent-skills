@@ -1,17 +1,13 @@
 #!/usr/bin/env bash
-# Block until something the orchestrator acts on changes, or until the timeout passes:
-# a worker's agent state, a workspace's group tag, a workspace disappearing, or a PR
-# appearing, merging, closing or turning conflicting. Only plan workspaces count, plus tagged ones whose branch
-# matches a plan item without a workspace (Reconcile adopts those); with no plan, all count.
-# Checks once a minute (POLL_SECONDS) for everything; meanwhile `agents wait` on each running
-# worker's terminal wakes it within a second or so of a worker settling (idle or blocked), when
-# the CLI has that command. When it exits, act on what changed and start it again.
+# Block until something the orchestrator acts on changes (a worker's agent state, a group tag, a
+# workspace vanishing, a PR appearing, merging, closing or turning conflicting), or the timeout.
+# Only plan workspaces count, plus tagged ones whose branch matches a workspace-less plan item;
+# with no plan, all. Polls every POLL_SECONDS (60); meanwhile `agents wait` on each working
+# terminal, where the CLI has it, wakes it within seconds of a worker settling.
 #
 # Usage: wait-change.sh <project-id> [plan-file] [timeout-seconds]   (default 1200)
-# Prints one line naming what changed ("changed: #340 agent working->idle, pr none->OPEN; ..."),
-# or "timeout" if nothing did.
-# A failing check (e.g. GitHub unreachable; status.sh already retries) doesn't stop the wait;
-# only if checks still fail at the timeout does it print the error and exit 1.
+# Prints "changed: #340 agent working->idle, pr none->OPEN; ..." or "timeout". Failing checks
+# (status.sh already retries) don't stop the wait; still failing at the timeout: error, exit 1.
 set -euo pipefail
 
 project=$1

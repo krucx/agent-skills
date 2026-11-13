@@ -1,24 +1,22 @@
 #!/usr/bin/env bash
-# Own and update the repo's plan file safely. Only one orchestrator may run a repo's plan at a
-# time: the plan records its owner (the Paradev terminal the orchestrator runs in) and a
-# heartbeat. Every write is checked against that owner, made under a lock, and swapped in
-# atomically, so a crash mid-write never leaves a half-written plan.
+# Own and update the repo's plan file safely: one orchestrator per repo's plan at a time. The plan
+# records its owner (the orchestrator's Paradev terminal) and a heartbeat; every write is
+# owner-checked, locked and swapped in atomically, so a crash never leaves a half-written plan.
 #
-# Usage (run from inside the repo):
-#   plan.sh path                  print the plan file path for this repo
-#   plan.sh check                 read-only: print none | finished | mine | other | stale
+# Usage (inside the repo):
+#   plan.sh path                  the plan file path for this repo
+#   plan.sh check                 read-only: none | finished | mine | other | stale
 #   plan.sh claim [--takeover [--force]]
-#                                 may this session start or resume a run? (see exit codes)
-#                                 --force takes over even from a live owner; only when the user
+#                                 may this session start or resume a run? (exit codes below)
+#                                 --force takes over even from a live owner, only when the user
 #                                 asks. "free" is followed by the closed run's carryOver, if any.
-#   plan.sh write <json-file>     replace the plan with <json-file> (owner and heartbeat are set)
-#   plan.sh heartbeat             refresh the heartbeat without other changes
+#   plan.sh write <json-file>     replace the plan with <json-file> (sets owner and heartbeat)
+#   plan.sh heartbeat             refresh the heartbeat only
 #   plan.sh close                 finish the run now; items not done or skipped go to carryOver
 #
-# An owner is live only while its heartbeat is fresh (under STALE_MINUTES, default 45) and its
-# terminal still runs an agent.
-# Exit codes: 0 ok; 3 another live orchestrator owns the active run (details on stdout);
-# 4 the active run is stale (owner gone or silent) and needs --takeover; 1 anything else.
+# An owner is live while its heartbeat is under STALE_MINUTES (45) old and its terminal runs an
+# agent. Exit: 0 ok; 3 a live orchestrator owns the active run (details on stdout); 4 the active
+# run is stale and needs --takeover; 1 anything else.
 set -euo pipefail
 
 STALE_MINUTES=${STALE_MINUTES:-45}
@@ -133,7 +131,7 @@ case ${1:-} in
     jq --arg now "$now" '.heartbeat = $now' "$plan" | put
     ;;
   *)
-    sed -n '2,22p' "$0"
+    sed -n '2,19p' "$0"
     exit 1
     ;;
 esac

@@ -1,26 +1,23 @@
 #!/usr/bin/env bash
-# Map the orchestrator's four logical groups (In Progress, In Review, Done, Blocked) to this
-# project's Paradev tags, so it files workspaces into the user's existing sidebar groups instead
-# of creating duplicates. The mapping lives in ~/.agents/orchestrator/groups.json, keyed by
-# project ID: {"<project-id>": {"In Progress": "in progress", "Blocked": "new group-6", ...}}.
+# Map the four groups (In Progress, In Review, Done, Blocked) to this project's Paradev tags, so
+# workspaces go into the user's existing sidebar groups, not duplicates. Saved in
+# ~/.agents/orchestrator/groups.json by project ID: {"<project-id>": {"In Progress": "wip", ...}}.
 #
 # Usage:
-#   groups.sh <project-id>               print the mapping as JSON; an unmapped group maps to its
-#                                        own name. Exit 2 when the project has no saved mapping.
-#   groups.sh <project-id> plan <file>   the plan's "groups" map if it has one (the run carries its
-#                                        map to whichever orchestrator picks it up), else as above
-#   groups.sh <project-id> suggest       propose a mapping: tags whose sidebar name matches a group
-#                                        (ignoring case), else the group's own name
-#   groups.sh <project-id> save <json>   save a mapping (object of group -> tag) for the project
-#   groups.sh <project-id> check <json>  are the map's tags still in Paradev? Prints the missing ones
-#                                        as {"group": "tag"}; exit 5 if any. A tag counts as present
-#                                        when Paradev has a folder for it, a workspace carries it, or
-#                                        it is the group's own name (a first move creates that folder).
+#   groups.sh <project-id>               the mapping as JSON (an unmapped group maps to its own
+#                                        name); exit 2 when the project has none saved
+#   groups.sh <project-id> plan <file>   the plan's "groups" if any (the run carries its map to
+#                                        whoever picks it up), else as above
+#   groups.sh <project-id> suggest       tags whose sidebar name matches a group (ignoring case),
+#                                        else the group's own name
+#   groups.sh <project-id> save <json>   save a group -> tag object for the project
+#   groups.sh <project-id> check <json>  print the map's tags Paradev lacks as {"group": "tag"};
+#                                        exit 5 if any. A tag is present if Paradev has its folder,
+#                                        a workspace carries it, or it is the group's own name.
 #
-# suggest and check read Paradev's private, undocumented host DB (~/.paradev/host/<org-id>/host.db, table
-# tag_folder_settings) strictly read-only; it never writes there. Override the DB path with
-# PARADEV_HOST_DB. If sqlite3 or the DB is missing or its schema differs, it warns in one line
-# and falls back to the groups' own names.
+# suggest and check read Paradev's private, undocumented host DB (~/.paradev/host/<org-id>/host.db,
+# table tag_folder_settings; PARADEV_HOST_DB overrides) strictly read-only. Without sqlite3, the
+# DB or the expected schema, they warn in one line and fall back to the groups' own names.
 set -euo pipefail
 
 project=${1:?usage: groups.sh <project-id> [suggest | save <json>]}

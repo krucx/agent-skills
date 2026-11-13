@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
-# Dispatch one plan item: build and check its branch, write the plan as in-progress, create the
-# workspace with the worker prompt, and record the workspace, terminal and branch.
+# Dispatch one plan item: pick a free branch, mark the item in-progress in the plan, create the
+# workspace with the worker prompt, and record workspace, terminal and branch.
 #
-# Usage (run inside the repo): dispatch.sh <project-id> <plan-file> <item-id> [--base <branch>] [--preset <id>]
-#   --base    branch the workspace starts from (default: the repo's default branch); a base other
-#             than the default makes the item stacked on that branch
+# Usage (inside the repo): dispatch.sh <project-id> <plan-file> <item-id> [--base <branch>] [--preset <id>]
+#   --base    start branch (default: the repo's default); any other base makes the item stacked
 #   --preset  agent instance or preset id to start (default: the item's "agent")
 #
-# Steps (branch, plan, workspace, record) are described in SKILL.md's Dispatch section; the first
-# failing one stops the run, and nothing is written before the plan write.
-# Prints one summary line on success, or "dispatch <id> failed at <step>: <reason>" and exit 1.
+# Steps: SKILL.md's Dispatch. The first failing step stops the run; nothing is written before
+# the plan write. Prints one summary line, or "dispatch <id> failed at <step>: <reason>", exit 1.
 # Works with bash 3.2 (no associative arrays) and zsh.
 set -euo pipefail
 
@@ -116,48 +114,43 @@ others=$(jq -r --arg id "$id" '[.items[] | select(.id != $id) | .id] | join(", "
   else
     [[ -z $text ]] || printf '%s\n\n' "$text"
   fi
-  printf '%s\n' "You are one of several agents working on this repo in parallel, each in its own worktree. An" \
-    "orchestrator coordinates the run; the others are working on ${others:-no other items}."
-  [[ -z $task ]] || printf '%s\n' "- $id is a label in this run's plan only, not a tracker ticket. The" \
-    "  task is $task. Don't fetch $id from any tracker."
-  printf '%s\n' "- Stay within $id. Don't make drive-by changes elsewhere: other branches are editing this code" \
-    "  at the same time." \
-    "- Keep shared machine resources apart from the other workers: put $branch in Docker Compose" \
-    "  project names, container names, scratch or data directories and temp files, and don't bind" \
-    "  fixed host ports that another worker might also use."
+  printf '%s\n' "You're one of several agents, each in its own worktree of this repo, coordinated by an" \
+    "orchestrator; the others work on ${others:-no other items}."
+  [[ -z $task ]] || printf '%s\n' "- $id is a label in this run's plan only, not a tracker ticket; don't fetch it. The task" \
+    "  is $task."
+  printf '%s\n' "- Stay within $id; no drive-by changes elsewhere (other branches are editing this code too)." \
+    "- Keep shared machine resources apart: put $branch in Docker Compose project names, container" \
+    "  names, scratch or data directories and temp files; bind no fixed host ports."
   if [[ -n $stacked ]]; then
     m=$(gh pr list --head "$base" --state all --json number --jq '.[0].number // empty' 2>/dev/null || true)
-    printf '%s\n' "- Stacked: this branch starts from $base (PR #${m:-?}, not merged yet). Say \"Stacked on #${m:-?};" \
-      "  merge that first\" in your PR description. Note the parent tip now (\`git rev-parse HEAD\` before" \
-      "  your first commit). When #${m:-?} merges, run \`git fetch origin && git rebase --onto origin/main" \
-      "  <that tip> HEAD\`, then \`git push --force-with-lease\`," \
-      "  and delete the \"merge that first\" line from the PR description (a squash-merge leaves the" \
-      "  parent's commits on your branch, so the PR conflicts until you do)."
+    printf '%s\n' "- Stacked: this branch starts from $base (PR #${m:-?}, unmerged). Put \"Stacked on #${m:-?}; merge" \
+      "  that first\" in the PR description. Note the parent tip now (\`git rev-parse HEAD\`, before your" \
+      "  first commit). When #${m:-?} merges: \`git fetch origin && git rebase --onto origin/main <that tip>" \
+      "  HEAD\`, \`git push --force-with-lease\`, and delete the \"merge that first\" line (a squash-merge" \
+      "  leaves the parent's commits on your branch, so the PR conflicts until then)."
   fi
-  printf '%s\n' "- Your goal is an open pull request. When the work is committed, push the branch and open the" \
-    "  PR yourself (\`gh pr create\`), even if your skill stops at a commit. If you need a decision" \
-    "  from a human, ask it plainly and stop." \
-    "- If you hit the same obstacle a second time (the same failing command or the same missing" \
-    "  access), do not try again: print ORCHESTRATOR_WORKER_BLOCKED with \`reason:\` naming that" \
-    "  obstacle and \`needs:\` naming what would clear it, and stop. Once the PR is open," \
-    "  a PR check you cannot fix is not an obstacle: it goes in \`checked:\` as below." \
-    "- Before you end a turn with your own background work still running (code-review subagents," \
-    "  say), or wait on something outside you that will finish by itself, print this once per" \
-    "  wait (not on every check, and never while you are actively implementing), the marker on a" \
-    "  line of its own:" \
+  printf '%s\n' "- Your goal is an open PR: once committed, push and \`gh pr create\` yourself, even if your skill" \
+    "  stops at a commit. Need a human decision? Ask it plainly and stop." \
+    "- If you hit the same obstacle a second time (same failing command or missing access), don't" \
+    "  retry: print ORCHESTRATOR_WORKER_BLOCKED, \`reason:\` the obstacle, \`needs:\` what would clear" \
+    "  it, and stop. Once the PR is open, a PR check you cannot fix is not an obstacle: it goes in" \
+    "  \`checked:\`." \
+    "- Before ending a turn with your own background work running (e.g. code-review subagents), or" \
+    "  while waiting on something external that finishes by itself, print this once per wait (not" \
+    "  per check, never while actively implementing), the marker on a line of its own:" \
     "  ORCHESTRATOR_WORKER_WAITING" "  item: $id" "  waiting-on: <what you are waiting for>" \
     "  resumes-when: <what ends the wait>" \
     "  Waiting is not blocked: a wait clears on its own, a block needs the orchestrator or a human." \
-    "  If what you wait on fails or stops, that is an obstacle as above. When the wait ends, carry" \
-    "  on and finish with one of the blocks below; it replaces the wait." \
-    "- You are done when the PR's checks have finished and it is mergeable, not when it is open." \
-    "  Before printing ORCHESTRATOR_WORKER_DONE, run \`gh pr checks <n> --watch --fail-fast\` and read" \
-    "  only its exit code and the names of failed checks. For a failed check, tail" \
-    "  \`gh run view <run-id> --log-failed\` (never fetch logs of green checks), fix what your change" \
-    "  caused, push, and watch again. Then confirm the base is not conflicting: \`gh pr view <n>" \
-    "  --json mergeable,mergeStateStatus,statusCheckRollup --jq '{mergeable, mergeStateStatus," \
-    "  failing: [.statusCheckRollup[] | select(.conclusion==\"FAILURE\") | .name]}'\`. On a conflict," \
-    "  merge or rebase the base and push. A check you cannot fix goes in \`checked:\` by name." \
+    "  If what you wait on fails or stops, that's an obstacle as above. When the wait ends, carry on" \
+    "  and finish with a block below; it replaces the wait." \
+    "- Done means the PR's checks finished and it's mergeable, not just open. Before" \
+    "  ORCHESTRATOR_WORKER_DONE: \`gh pr checks <n> --watch --fail-fast\`, reading only its exit code" \
+    "  and failed check names; for a failure tail \`gh run view <run-id> --log-failed\` (never green" \
+    "  checks' logs), fix what your change caused, push, watch again. Then confirm no conflict:" \
+    "  \`gh pr view <n> --json mergeable,mergeStateStatus,statusCheckRollup --jq '{mergeable," \
+    "  mergeStateStatus, failing: [.statusCheckRollup[] | select(.conclusion==\"FAILURE\") | .name]}'\`;" \
+    "  on a conflict merge or rebase the base and push. A check you cannot fix goes in \`checked:\`" \
+    "  by name." \
     "- Finish your last message with exactly one of these, the marker on a line of its own:" \
     "  ORCHESTRATOR_WORKER_DONE" "  item: $id" "  pr: <url>" "  summary: <one line>" \
     "  checked: <what you verified against the task, and the PR's checks in a few words (\"5/5" \
