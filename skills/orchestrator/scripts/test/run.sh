@@ -210,6 +210,89 @@ out=$(cat "$root/out")
 expect "wait: one-line summary" "$out" "changed: #10 agent working->idle"
 expect_exit "wait: single line" "$(wc -l <"$root/out" | tr -d ' ')" 1
 
+# --- dispatch: branch collisions, recording, and rollback --------------------------------------
+dispatch_sandbox() { # a bare "origin" the sandbox repo's github URL is redirected to
+  sandbox
+  git init -q --bare "$root/origin.git"
+  git config url."file://$root/origin.git".insteadOf https://github.com/acme/app.git
+  git config user.email t@t; git config user.name t
+  plan=$("$scripts/plan.sh" path)  # the rewritten origin URL changes the plan's name
+  git commit -q --allow-empty -m init
+  plan_with "[$(jq -nc '{id: "#20", title: "Add CSV export, please!", state: "queued", branch: null, workspace: null, terminal: null, skill: "implement", agent: "claude"}'), $(item '#21' queued '' '')]" \
+    '{"groups": {"In Progress": "wip"}}'
+  snapshot w-new t-new working
+}
+dispatch() { "$scripts/dispatch.sh" proj "$plan" '#20' "$@"; }
+plan_item() { jq -c '.items[] | select(.id == "#20") | {state, branch, workspace, terminal, reason, f: .dispatchFailures}' "$plan"; }
+
+dispatch_sandbox
+out=$(dispatch 2>&1); code=$?
+expect_exit "dispatch: success exits 0" $code 0
+expect "dispatch: one summary line" "$out" "dispatched #20 -> issue-20-add-csv-export-please (workspace w-new, terminal t-new)"
+expect_exit "dispatch: output is one line" "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" 1
+expect "dispatch: plan records workspace, terminal, branch" "$(plan_item)" \
+  '{"state":"in-progress","branch":"issue-20-add-csv-export-please","workspace":"w-new","terminal":"t-new"'
+args=$(cat "$FIX/create.args")
+expect "dispatch: tag comes from the plan's groups" "$args" $'--tag\nwip'
+expect "dispatch: prompt starts with the skill" "$args" "/implement #20"
+expect "dispatch: prompt names the other items" "$args" "the others are working on #21."
+expect_not "dispatch: output never echoes the prompt" "$out" "ORCHESTRATOR_WORKER_DONE"
+
+# collision: remote branch, local branch, plan branch, and a PR each push the name to -2, -3, ...
+dispatch_sandbox
+git push -q origin HEAD:refs/heads/issue-20-add-csv-export-please
+expect "collision: remote branch gets -2" "$(dispatch 2>&1)" "-> issue-20-add-csv-export-please-2 "
+dispatch_sandbox
+git branch issue-20-add-csv-export-please
+git push -q origin HEAD:refs/heads/issue-20-add-csv-export-please-2
+expect "collision: local and remote branches get -3" "$(dispatch 2>&1)" "-> issue-20-add-csv-export-please-3 "
+dispatch_sandbox
+plan_with "[$(jq -nc '{id: "#20", title: "Add CSV export", state: "queued", branch: null}'), $(item '#21' in-progress w21 t21 | jq -c '.branch = "issue-20-add-csv-export"')]"
+expect "collision: a branch in the plan gets -2" "$(dispatch 2>&1)" "-> issue-20-add-csv-export-2 "
+dispatch_sandbox
+echo '[{"headRefName": "issue-20-add-csv-export-please", "number": 3}]' >"$FIX/prs.json"
+expect "collision: a branch with a PR gets -2" "$(dispatch 2>&1)" "-> issue-20-add-csv-export-please-2 "
+
+# rollback: the plan goes back to queued, and to blocked on the second failure
+dispatch_sandbox
+echo "host unreachable" >"$FIX/create-fail"
+before=$(cat "$plan")
+out=$(dispatch 2>&1); code=$?
+expect_exit "rollback: failure exits 1" $code 1
+expect "rollback: names the failing step" "$out" "dispatch #20 failed at workspace: host unreachable"
+expect "rollback: first failure is queued again" "$(plan_item)" '{"state":"queued","branch":null,"workspace":null,"terminal":null,"reason":null,"f":1}'
+dispatch >/dev/null 2>&1; code=$?
+expect_exit "rollback: second failure exits 1" $code 1
+expect "rollback: second failure is blocked with the error" "$(plan_item)" '"state":"blocked"'
+expect "rollback: reason is the error" "$(plan_item)" 'workspace creation failed: host unreachable'
+out=$(dispatch 2>&1); code=$?
+expect "rollback: a blocked item is not dispatched again" "$out" "item is blocked, not queued"
+
+# a refused plan write leaves the plan untouched and creates nothing
+dispatch_sandbox
+jq '.owner = "someone-else"' "$plan" >"$root/p" && mv "$root/p" "$plan"
+snapshot w-new t-new working someone-else
+before=$(cat "$plan")
+out=$(dispatch 2>&1); code=$?
+expect_exit "plan refusal: exits 1" $code 1
+expect "plan refusal: names the step" "$out" "failed at plan"
+expect_exit "plan refusal: plan untouched" "$([[ $(cat "$plan") == "$before" ]] && echo 0 || echo 1)" 0
+expect_exit "plan refusal: no workspace created" "$([[ -f $FIX/create.args ]] && echo 1 || echo 0)" 0
+
+# stacked prompt, and free-text branch names
+dispatch_sandbox
+out=$(dispatch --base issue-19-dep 2>&1)
+expect "stacked: prompt says stacked" "$(cat "$FIX/create.args")" "Stacked: this branch starts from issue-19-dep"
+dispatch_sandbox
+plan_with "[$(jq -nc '{id: "T1", title: "Cache the thing", text: "Add a cache.", state: "queued", branch: null}')]"
+expect "free text: task-<runId>-t1-<slug>" "$("$scripts/dispatch.sh" proj "$plan" T1 2>&1)" "-> task-20261112-1200-t1-cache-the-thing "
+
+# zsh too, when installed
+if command -v zsh >/dev/null; then
+  dispatch_sandbox
+  expect "zsh: dispatch runs" "$(zsh "$scripts/dispatch.sh" proj "$plan" '#20' 2>&1)" "dispatched #20"
+fi
+
 echo
 echo "$pass passed, $fail failed (bash $BASH_VERSION, $(uname -s))"
 ((fail == 0))

@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
-# Test shim for the GitHub CLI: pr list answers from $FIX/prs.json (default: no PRs).
+# Test shim for the GitHub CLI: pr list answers from $FIX/prs.json (default: no PRs), honouring
+# --head <branch> and --jq <expr> like the real one.
 set -euo pipefail
+arg() { local want=$1; shift; while (($#)); do [[ $1 == "$want" ]] && { echo "$2"; return; }; shift; done; }
 case "$1 ${2:-}" in
-  "pr list") cat "$FIX/prs.json" 2>/dev/null || echo '[]' ;;
+  "pr list")
+    out=$(cat "$FIX/prs.json" 2>/dev/null || echo '[]')
+    head=$(arg --head "$@")
+    [[ -z $head ]] || out=$(jq -c --arg h "$head" 'map(select(.headRefName == $h))' <<<"$out")
+    expr=$(arg --jq "$@")
+    if [[ -n $expr ]]; then jq -r "$expr" <<<"$out"; else echo "$out"; fi ;;
   *) echo "gh shim: unsupported: $*" >&2; exit 1 ;;
 esac
