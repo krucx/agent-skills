@@ -143,9 +143,9 @@ others=$(jq -r --arg id "$id" '[.items[] | select(.id != $id) | .id] | join(", "
     "  Waiting is not blocked: a wait clears on its own, a block needs the orchestrator or a human." \
     "  If what you wait on fails or stops, that's an obstacle as above. When the wait ends, carry on" \
     "  and finish with a block below; it replaces the wait." \
-    "- Done means the PR's checks finished and it's mergeable, not just open. Before" \
-    "  ORCHESTRATOR_WORKER_DONE: \`gh pr checks <n> --watch --fail-fast\`, reading only its exit code" \
-    "  and failed check names; for a failure tail \`gh run view <run-id> --log-failed\` (never green" \
+    "- Done means the PR's checks finished and it's mergeable, not just open. Before printing" \
+    "  ORCHESTRATOR_WORKER_DONE, run \`gh pr checks <n> --watch --fail-fast\`, reading only its exit" \
+    "  code and failed check names; for a failure tail \`gh run view <run-id> --log-failed\` (never green" \
     "  checks' logs), fix what your change caused, push, watch again. Then confirm no conflict:" \
     "  \`gh pr view <n> --json mergeable,mergeStateStatus,statusCheckRollup --jq '{mergeable," \
     "  mergeStateStatus, failing: [.statusCheckRollup[] | select(.conclusion==\"FAILURE\") | .name]}'\`;" \

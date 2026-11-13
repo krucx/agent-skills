@@ -2,8 +2,8 @@
 # Block until something the orchestrator acts on changes (a worker's agent state, a group tag, a
 # workspace vanishing, a PR appearing, merging, closing or turning conflicting), or the timeout.
 # Only plan workspaces count, plus tagged ones whose branch matches a workspace-less plan item;
-# with no plan, all. Polls every POLL_SECONDS (60); meanwhile `agents wait` on each working
-# terminal, where the CLI has it, wakes it within seconds of a worker settling.
+# with no plan, all. Polls every POLL_SECONDS (60); meanwhile, where the CLI has `agents wait`,
+# one per working terminal wakes the script within seconds of a worker settling.
 #
 # Usage: wait-change.sh <project-id> [plan-file] [timeout-seconds]   (default 1200)
 # Prints "changed: #340 agent working->idle, pr none->OPEN; ..." or "timeout". Failing checks
