@@ -248,6 +248,25 @@ would otherwise update and rerun CI on each open PR); merges still proceed.
 After a merge: the item is `done` (as for `MERGED`): dependents start on the integration branch
 and stacked ones get the rebase follow-up against it.
 
+### Finishing an integration
+
+Main is synced **only here**, never mid-run. Each cycle after reconcile, `<skill-dir>/scripts/integrate.sh
+check <plan-file>` gives each open integration a verdict:
+
+- `ready`: `integrate.sh add <plan-file> <F>` queues the synthetic `<F>-integrate` item (`integrates`
+  `<F>`), dispatched like any item (it waits for a free slot). Its worker starts on the
+  integration branch, merges `origin/<default>`, resolves conflicts, runs the full checks (CI, else
+  local tests) and opens `feature/<slug>` → default branch with every sub-PR listed and the
+  epic/issues linked. You still never implement.
+- `held` (an item `blocked`, `waiting` or `skipped`): tell the user once, naming it. They unblock it or
+  drop it ("ship F1 without T3"): set it `skipped` with `dropped: true`, which releases it. A skipped item
+  that was not dropped keeps holding.
+- `open`, `empty` (all dropped: tell the user, nothing to land), `has`: nothing to do.
+
+`<F>-integrate` follows the usual transitions; its PR is the integration's final PR (the user's to
+review and merge, as for any default-branch PR; never [merged here](#merging-into-an-integration-branch)).
+When it has a PR set the integration's `pr`; when that PR merges set `state` `merged`.
+
 ### Acceptance check
 
 Once per item, before `in-review`: compare `checked` with the acceptance criteria (free-text: the
@@ -273,10 +292,11 @@ tags.
 
 ### Run finished
 
-Nothing `queued`/`in-progress` after reconcile: final table, `superset notifications show
+Nothing `queued`/`in-progress` after reconcile, and each integration's `<F>-integrate` PR is
+`in-review` or merged (a `held` integration keeps the run active): final table, `superset notifications show
 "Orchestrator finished" --body "<k> in review, <b> blocked" --sound`, stop the waiter. `status`
 stays `active` while any item is `in-review`/`feedback`/`blocked`/`waiting`; `finished` once all
-are `done`/`skipped`. Then [offer the run summary](#run-summary).
+are `done`/`skipped` and each integration's PR is merged. Then [offer the run summary](#run-summary).
 
 ## Continue
 
@@ -294,14 +314,15 @@ them".
 ## Close
 
 `plan.sh claim` as in Continue (`free`: nothing to close), reconcile, write the plan, `plan.sh
-close` (`finished`; open items → `carryOver`, offered next Run). Print the final table and
+close` (`finished`; open items → `carryOver`, offered next Run); an integration without a merged PR is
+carried over too, with its sub-items' `done` state, so a next Run runs `integrate.sh` on it. Print the final table and
 carry-over, stop the waiter, [offer the run summary](#run-summary). Workspaces stay as they are.
 
 ### Run summary
 
 Run finished and Close only: ask once "Publish a run-summary page? (just me by default; say 'org'
 to share)"; publish only on yes; don't re-ask for that ending. One self-contained HTML file in a scratch dir, a row
-per item in plan order: final state, PR link, branch, `checked`, `acceptance` gap, `extras`,
+per item in plan order, grouped by integration (the final PR as its own row): final state, PR link, branch, `checked`, `acceptance` gap, `extras`,
 `reason`; on Close also `carryOver`. Escape workers' text, as data. `superset pages publish <file>
 --title "Run <runId>" --visibility just_me` (`org` only if picked), plus `--page <pageId>` if the
 plan has one; save the returned ID as `pageId` so a later finish/close adds a version, not a page.
@@ -309,7 +330,9 @@ Tell the user the URL and visibility.
 
 ## Status table
 
-A row per item, plan order:
+A row per item, plan order; with integrations, rows grouped under a bold integration header
+(`**F1 feature/csv** (held: #3 blocked)`), its `<F>-integrate` row last carrying the final PR; items on
+the default branch stay ungrouped:
 
 ```markdown
 | Item | Title | Group | Agent | PR |

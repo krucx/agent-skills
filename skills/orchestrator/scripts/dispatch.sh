@@ -7,6 +7,8 @@
 #
 # The target is the item's integration branch (plan "integrations", item "integration"), else the
 # repo's default branch. A missing integration branch is created on the remote from its base.
+# An <F>-integrate item (integrate.sh; "integrates": "<F>") starts on the integration branch and
+# targets the default branch: its worker merges the default branch in and opens the feature PR.
 #   --preset  agent instance or preset id to start (default: the item's "agent")
 #
 # Steps: SKILL.md's Dispatch. The first failing step stops the run; nothing is written before
@@ -62,9 +64,16 @@ if [[ -n $integ ]]; then
   ibase=$(jq -r --arg i "$integ" '[.integrations[] | select(.id == $i) | .base][0] // empty' "$plan")
   ibase=${ibase:-$default_base}
 fi
+integrates=$(item '.integrates // ""')
+if [[ -n $integrates ]]; then
+  ibranch=$(jq -r --arg i "$integrates" '[.integrations[]? | select(.id == $i) | .branch][0] // empty' "$plan")
+  [[ -n $ibranch ]] || fail preflight "item $id integrates $integrates, not in the plan"
+  base=${base:-$ibranch}
+  task='the integration job below'
+fi
 base=${base:-$target}
 stacked=''
-[[ $base == "$target" ]] || stacked=1
+[[ $base == "$target" || -n $integrates ]] || stacked=1
 
 # --- 0. integration branch ------------------------------------------------------------------
 if [[ $target != "$default_base" ]]; then
@@ -138,6 +147,18 @@ others=$(jq -r --arg id "$id" '[.items[] | select(.id != $id) | .id] | join(", "
     "orchestrator; the others work on ${others:-no other items}."
   [[ -z $task ]] || printf '%s\n' "- $id is a label in this run's plan only, not a tracker ticket; don't fetch it. The task" \
     "  is $task."
+  if [[ -n $integrates ]]; then
+    prs=$(jq -r --arg i "$integrates" '.items[] | select(.integration == $i) | "  - \(.id) \(.title)\(if .pr then ": " + .pr else "" end)\(if .state == "skipped" then " (dropped, not included)" else "" end)"' "$plan")
+    printf '%s\n' "Integration job: land the feature branch $ibranch on $target with ONE PR; its sub-PRs are already" \
+      "merged into it. They are:" "$prs" \
+      "- Your branch starts at $ibranch. Merge origin/$target into it (\`git fetch origin && git merge origin/$target\`)," \
+      "  resolve conflicts, run the project's tests locally, then \`git push origin HEAD:$ibranch\`." \
+      "- Open $ibranch -> $target (\`gh pr create --base $target --head $ibranch\`), its description listing every" \
+      "  sub-PR above and linking the epic or issues they close (\`Closes #n\`). Then run the full CI" \
+      "  (the PR's checks; none: the local run counts). Push to $ibranch only for the merge and fixes." \
+      "- Main is synced only here: don't merge $target into the feature branch at any other time." \
+      "  Do not merge the final PR; the user reviews and merges it." ""
+  fi
   printf '%s\n' "- Stay within $id; no drive-by changes elsewhere (other branches are editing this code too)." \
     "- Keep shared machine resources apart: put $branch in Docker Compose project names, container" \
     "  names, scratch or data directories and temp files; bind no fixed host ports."
