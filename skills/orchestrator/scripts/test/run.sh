@@ -113,6 +113,22 @@ expect "worker: marker" "$out" '"marker":"done"'
 expect "worker: wrapped checked rejoined" "$out" '"checked":"ran the export on the sample data and compared it with the fixture"'
 expect "worker: compact shows checked" "$(status --compact)" "worker done, checked: ran the export"
 
+# --- compact: checked text once, then a short marker once the plan has it -----------------------
+jq '.items[0].checked = "ran the export on the sample data and compared it with the fixture"' "$plan" >"$plan.tmp" &&
+  mv "$plan.tmp" "$plan"
+out=$(status --compact)
+expect "compact: settled item keeps a short marker" "$out" "worker done, checked: in plan"
+expect_not "compact: settled item drops the text" "$out" "sample data"
+expect "full output still has checked" "$(status)" '"checked":"ran the export on the sample data'
+jq '.items[0].checked = "something older"' "$plan" >"$plan.tmp" && mv "$plan.tmp" "$plan"
+expect "compact: changed checked prints again" "$(status --compact)" "checked: ran the export"
+
+# --- one batched gh call per cycle ---------------------------------------------------------------
+export GH_LOG="$FIX/gh.log"
+status >/dev/null
+expect "gh: one pr list per cycle" "$(wc -l <"$GH_LOG" | tr -d ' ')" "1"
+unset GH_LOG
+
 # --- worker block: the prompt's placeholder template is not a report --------------------------
 sandbox
 plan_with "[$(item '#13' in-progress w13 t13)]"

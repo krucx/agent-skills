@@ -258,7 +258,7 @@ row, read the screen; while it runs, skip the row (no transition, no follow-up, 
 
 | Seen | Do |
 | --- | --- |
-| `in-progress`, PR exists | Once `checked:` is out (or `idle`): save it, [acceptance check](#acceptance-check), `in-review` (not waiting for CI). |
+| `in-progress`, PR exists | Once `checked:` is out (or `idle`): save it (`--compact` shows `checked:` only until the plan holds it), [acceptance check](#acceptance-check), `in-review` (not waiting for CI). |
 | `in-review`, agent `working` | User is giving feedback: `feedback` (not counted toward the limit). |
 | `feedback`, reason "follow-up sent" or "acceptance follow-up", agent `working` | Picked up: clear the reason. |
 | `feedback`, agent `idle` | Reason still set (not started): wait. Else `in-review`; after an acceptance follow-up, re-compare once, keeping a remaining gap. |

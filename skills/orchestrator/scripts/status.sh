@@ -23,7 +23,8 @@
 #   pr                     newest PR for the branch {number,url,state,isDraft}, or null
 #
 # --compact prints one short line per workspace instead, for watch cycles; it adds "branch <b>" or
-# "terminal <t>" only when they differ from the plan's.
+# "terminal <t>" only when they differ from the plan's, and the worker's checked: text only when the
+# plan hasn't recorded that text yet (otherwise "checked: in plan").
 # Screen hashes live in ~/.agents/orchestrator/screens/<plan's runId, else project>.json.
 # gh and Paradev list calls are retried 3 times, RETRY_DELAY (default 5) seconds apart, doubling.
 set -euo pipefail
@@ -64,7 +65,7 @@ done | jq -sc '.')
 planned='[]'
 if [[ -n "$plan" && -f "$plan" ]]; then
   planned=$(jq -c '[.items[] | select(.workspace != null)
-    | {id: .workspace, branch, item: .id, terminal}]' "$plan")
+    | {id: .workspace, branch, item: .id, terminal, checked}]' "$plan")
 fi
 
 # Planned workspaces that carry no group tag: look them up one by one.
@@ -101,6 +102,7 @@ rows=$(jq -c --argjson tagged "$tagged" --argjson extra "$extra" --argjson plann
       pr: ([$prs[] | select(.headRefName == $ws.branch)][0]
            | if . == null then null else {number, url, state, isDraft} end),
       planBranch: $p.branch,
+      planChecked: $p.checked,
       planTerminal: $p.terminal
     }')
 
@@ -174,9 +176,11 @@ if [[ -n $compact ]]; then
          + (if .inPlan and .agent.terminal and .planTerminal != .agent.terminal
             then ["terminal \(.agent.terminal) (\(.agent.id))"] else [] end)
          + (if .worker then ["worker \(.worker.marker)"
-              + (if .worker.checked then ", checked: \(.worker.checked)" else "" end)
+              + (if .worker.checked == null then ""
+                 elif .worker.checked == .planChecked then ", checked: in plan"
+                 else ", checked: \(.worker.checked)" end)
               + (if .worker.reason then ", reason: \(.worker.reason)" else "" end)] else [] end)
          | join(" | ")' <<<"$out"
 else
-  jq -c 'del(.screen, .planBranch, .planTerminal)' <<<"$out"
+  jq -c 'del(.screen, .planBranch, .planTerminal, .planChecked)' <<<"$out"
 fi
