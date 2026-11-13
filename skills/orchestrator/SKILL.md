@@ -175,6 +175,14 @@ Start an item once each dependency has a PR (or is met) and fewer than the limit
 `in-progress` (`feedback` excluded); never stack on one in `feedback`: wait for `in-review` or
 merge.
 
+**Squash-merge repos**: a stacked branch still carries its parent's original commits, so it
+conflicts once the parent squash-merges. Check once per run, with `gh repo view --json
+squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed` (and the base branch's ruleset, if
+`gh api` shows one restricting methods). When squash is the only method, don't stack: a dependent
+waits for its parent to merge, then starts on `main`. Exception: the user says the dependency is
+only a soft ordering, so start it on `main` at once. Otherwise stack, and the worker prompt
+carries the rebase recipe.
+
 **Branch**: `issue-340-<slug>`, lowercase key (`eng-123-<slug>`), or `task-<runId>-t1-<slug>`
 (free text). `<slug>`: lowercase ASCII title, other runs one hyphen, at most 4 words; branch ≤ 60
 characters, no edge hyphens. Taken (`git ls-remote --heads origin`, local `refs/heads`, the plan,
@@ -225,7 +233,11 @@ orchestrator coordinates the run; the others are working on <other IDs>.
   project names, container names, scratch or data directories and temp files, and don't bind
   fixed host ports that another worker might also use.
 - Stacked: this branch starts from <branch> (PR #<m>, not merged yet). Say "Stacked on #<m>;
-  merge that first" in your PR description.
+  merge that first" in your PR description. Note the parent tip now (`git rev-parse HEAD` before
+  your first commit). When #<m> merges, run `git fetch origin && git rebase --onto origin/main
+  <that tip> HEAD`, then `git push --force-with-lease`,
+  and delete the "merge that first" line from the PR description (a squash-merge leaves the
+  parent's commits on your branch, so the PR conflicts until you do).
 - Your goal is an open pull request. When the work is committed, push the branch and open the
   PR yourself (`gh pr create`), even if your skill stops at a commit. If you need a decision
   from a human, ask it plainly and stop.
@@ -296,6 +308,7 @@ row, read the screen; while it runs, skip the row (no transition, no follow-up, 
 | `in-progress`, agent `idle`, no PR | `ORCHESTRATOR_WORKER_BLOCKED` printed or one follow-up already sent: `blocked` with its reason, free the slot, tell the user. Else one follow-up: finish and open the PR. |
 | PR `MERGED` | `done`; unstarted dependents base on `main`; send follow-ups waiting on it. |
 | PR `CLOSED` unmerged | `blocked`, "PR closed unmerged"; tell the user. |
+| Stacked item's PR `conflicting` (status.sh: `CONFLICTING (base <parent branch>)`) and its parent is `done` | Send the worker, unasked, the rebase follow-up: `git fetch origin && git rebase --onto origin/main <parent tip> HEAD`, `git push --force-with-lease`, remove "merge <parent> first" from the PR description. `feedback`, reason "follow-up sent". Once per item; still `CONFLICTING` after it, tell the user. |
 
 **Dependency fails** (`blocked`, `skipped`, PR closed unmerged): queued dependents `waiting`,
 "waiting on <ID>: <its reason>"; never start, re-plan or un-depend them yourself. Started

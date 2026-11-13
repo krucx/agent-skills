@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Block until something the orchestrator acts on changes, or until the timeout passes:
 # a worker's agent state, a workspace's group tag, a workspace disappearing, or a PR
-# appearing, merging or closing. Only plan workspaces count, plus tagged ones whose branch
+# appearing, merging, closing or turning conflicting. Only plan workspaces count, plus tagged ones whose branch
 # matches a plan item without a workspace (Reconcile adopts those); with no plan, all count.
 # Checks once a minute (POLL_SECONDS). When it exits, act on what changed and start it again.
 #
@@ -26,7 +26,7 @@ signature() {
   "$here/status.sh" "$project" "$plan" |
     jq -sc --argjson adoptBranches "$adoptBranches" '
       map(select($adoptBranches == null or .inPlan or (.branch as $b | $adoptBranches | index($b) != null))
-        | {id, item, group, missing, agent: .agent.state, pr: (.pr.state // null)})'
+        | {id, item, group, missing, agent: .agent.state, pr: (.pr.state // null), conflict: (.pr.conflicting // null)})'
 }
 
 errfile=$(mktemp "${TMPDIR:-/tmp}/wait-change.XXXXXX")
@@ -44,7 +44,7 @@ while :; do
         [.[] | . as $now | ([$start[] | select(.id == $now.id)][0]) as $was
           | select($was != $now)
           | "\($now.item // $now.id) " + if $was == null then "appeared" else
-              ([("group", "missing", "agent", "pr") as $k | select($was[$k] != $now[$k])
+              ([("group", "missing", "agent", "pr", "conflict") as $k | select($was[$k] != $now[$k])
                 | "\($k) \($was[$k] // "none")->\($now[$k] // "none")"] | join(", ")) end]
         | join("; ")' <<<"$now")
       if [[ -n "$changed" ]]; then

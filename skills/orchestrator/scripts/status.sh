@@ -20,7 +20,9 @@
 #                                     STALL_MINUTES (default 15)
 #   worker                 the last ORCHESTRATOR_WORKER_DONE/BLOCKED block on screen as
 #                          {marker, item, pr, summary, checked, reason, needs}, or null
-#   pr                     newest PR for the branch {number,url,state,isDraft}, or null
+#   pr                     newest PR for the branch {number,url,state,isDraft}, or null; an open
+#                          PR GitHub reports CONFLICTING also has "conflicting": true and
+#                          "base" (its base branch), from one filtered `gh pr list` for all PRs
 #
 # --compact prints one short line per workspace instead, for watch cycles; it adds "branch <b>" or
 # "terminal <t>" only when they differ from the plan's.
@@ -55,6 +57,10 @@ retry() {
 groups=$("$here/groups.sh" "$project" plan "$plan") || (($? == 2))
 snapshot=$(retry "$cli" snapshot --json)
 prs=$(retry gh pr list --state all --limit 300 --json headRefName,number,url,state,isDraft)
+# Only the open PRs GitHub calls CONFLICTING, with their bases (a stacked PR whose parent
+# squash-merged), in one call rather than a view per PR.
+conflicts=$(retry gh pr list --state open --limit 300 --json number,baseRefName,mergeable |
+  jq -c '[.[] | select(.mergeable == "CONFLICTING") | {number, base: .baseRefName}]')
 
 tagged=$(jq -r 'to_entries[] | "\(.key)\t\(.value)"' <<<"$groups" | while IFS=$'\t' read -r group tag; do
   retry "$cli" workspaces list --local --project "$project" --tag "$tag" --json |
@@ -85,7 +91,7 @@ extra=$(jq -c '.[]' <<<"$untagged" | while IFS= read -r p; do
 done | jq -sc '.')
 
 rows=$(jq -c --argjson tagged "$tagged" --argjson extra "$extra" --argjson planned "$planned" \
-  --argjson snapshot "$snapshot" --argjson prs "$prs" -n '
+  --argjson snapshot "$snapshot" --argjson prs "$prs" --argjson conflicts "$conflicts" -n '
   ($tagged | map(. + {missing: false})) + $extra
   | .[]
   | . as $ws
@@ -99,7 +105,10 @@ rows=$(jq -c --argjson tagged "$tagged" --argjson extra "$extra" --argjson plann
                 else {terminal: .id, id: .agent.id, state: .agent.state, reason: null} end),
       worker: null,
       pr: ([$prs[] | select(.headRefName == $ws.branch)][0]
-           | if . == null then null else {number, url, state, isDraft} end),
+           | if . == null then null else
+               {number, url, state, isDraft} as $pr
+               | ([$conflicts[] | select(.number == $pr.number)][0]) as $c
+               | if $c then $pr + {conflicting: true, base: $c.base} else $pr end end),
       planBranch: $p.branch,
       planTerminal: $p.terminal
     }')
@@ -168,7 +177,9 @@ mv -f "$screens.tmp.$$" "$screens"
 if [[ -n $compact ]]; then
   jq -r '[(.item // .name // .id), (.group // "-"),
           (.agent.state + (if .agent.reason then " (\(.agent.reason))" else "" end)),
-          (if .pr then "PR #\(.pr.number) \(.pr.state)" else "no PR" end)]
+          (if .pr then "PR #\(.pr.number) \(.pr.state)"
+            + (if .pr.conflicting then " CONFLICTING (base \(.pr.base))" else "" end)
+           else "no PR" end)]
          + (if .missing then ["missing"] else [] end)
          + (if .planBranch and .branch != .planBranch then ["branch \(.branch)"] else [] end)
          + (if .inPlan and .agent.terminal and .planTerminal != .agent.terminal
