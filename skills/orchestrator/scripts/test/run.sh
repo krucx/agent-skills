@@ -210,6 +210,60 @@ out=$(cat "$root/out")
 expect "wait: one-line summary" "$out" "changed: #10 agent working->idle"
 expect_exit "wait: single line" "$(wc -l <"$root/out" | tr -d ' ')" 1
 
+# --- wait-change wakes on agents wait, polls for the rest ------------------------------------
+# The poll is 30s, so anything seen within a few seconds came from `agents wait`.
+wait_run() { # wait_run <timeout> -> out, elapsed
+  local t0=$SECONDS
+  POLL_SECONDS=${POLL:-30} "$scripts/wait-change.sh" proj "$plan" "$1" >"$root/out" 2>&1; code=$?
+  out=$(cat "$root/out"); elapsed=$((SECONDS - t0))
+}
+wait_sandbox() {
+  sandbox
+  plan_with "[$(item '#10' in-progress w10 t10)]"
+  ws w10 b-#10 "In Progress"; snapshot w10 t10 working; echo x >"$FIX/screens/t10"
+}
+
+wait_sandbox
+(sleep 2; snapshot w10 t10 idle) &
+wait_run 60
+expect "wait agents: settle wakes before the poll" "$out" "changed: #10 agent working->idle"
+expect_exit "wait agents: exit 0" $code 0
+((elapsed < 10)) && ok "wait agents: woke in ${elapsed}s" || bad "wait agents: woke early" "<10s" "${elapsed}s"
+sleep 0.3
+expect_exit "wait agents: no orphaned waiters after a change" \
+  "$(awk '{print $1}' "$FIX/agents-wait.log" | while read -r p; do kill -0 "$p" 2>/dev/null && echo alive; done | wc -l | tr -d ' ')" 0
+
+wait_sandbox
+(sleep 1; echo '[{"headRefName": "b-#10", "number": 5, "url": "u5", "state": "OPEN", "isDraft": false}]' >"$FIX/prs.json") &
+POLL=2 wait_run 30
+expect "wait agents: PR change without an agent change is polled" "$out" "changed: #10 pr none->OPEN"
+sleep 0.3
+expect_exit "wait agents: no orphaned waiters after a PR change" \
+  "$(awk '{print $1}' "$FIX/agents-wait.log" | while read -r p; do kill -0 "$p" 2>/dev/null && echo alive; done | wc -l | tr -d ' ')" 0
+
+wait_sandbox
+POLL=2 wait_run 4
+expect "wait agents: timeout still prints timeout" "$out" "timeout"
+expect_exit "wait agents: timeout exit 0" $code 0
+sleep 0.3
+expect_exit "wait agents: no orphaned waiters after timeout" \
+  "$(awk '{print $1}' "$FIX/agents-wait.log" | while read -r p; do kill -0 "$p" 2>/dev/null && echo alive; done | wc -l | tr -d ' ')" 0
+
+# old CLI: no agents wait, the poll still sees the change
+wait_sandbox; touch "$FIX/no-agents-wait"
+(sleep 1; snapshot w10 t10 idle) &
+POLL=2 wait_run 30
+expect "wait fallback: poll sees the change" "$out" "changed: #10 agent working->idle"
+[[ ! -f $FIX/agents-wait.log ]] && ok "wait fallback: no agents wait started" || bad "wait fallback" "no waiters" "$(cat "$FIX/agents-wait.log")"
+
+# interrupt: waiters die with the waiter
+wait_sandbox
+POLL_SECONDS=30 "$scripts/wait-change.sh" proj "$plan" 60 >/dev/null 2>&1 &
+waiter=$!
+sleep 3; kill -INT $waiter 2>/dev/null; wait $waiter 2>/dev/null; sleep 0.5
+expect_exit "wait agents: no orphaned waiters after interrupt" \
+  "$(awk '{print $1}' "$FIX/agents-wait.log" | while read -r p; do kill -0 "$p" 2>/dev/null && echo alive; done | wc -l | tr -d ' ')" 0
+
 # --- dispatch: branch collisions, recording, and rollback --------------------------------------
 dispatch_sandbox() { # a bare "origin" the sandbox repo's github URL is redirected to
   sandbox

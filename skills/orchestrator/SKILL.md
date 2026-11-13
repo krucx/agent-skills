@@ -215,7 +215,8 @@ Repair the plan before applying any transition:
 
 ## Watch and move
 
-`<skill-dir>/scripts/wait-change.sh <project-id> <plan-file>` polls each minute; exits with a
+`<skill-dir>/scripts/wait-change.sh <project-id> <plan-file>` polls each minute and wakes within seconds when a
+worker settles (`superset agents wait`, where the CLI has it); exits with a
 one-line summary when a plan (or adoptable) workspace's agent state, tag or PR changes or it
 vanishes, else after 20 minutes. Background it if the harness notifies on exit, else
 foreground with a short timeout (`wait-change.sh <project-id> <plan-file> 120`). On exit:

@@ -5,6 +5,8 @@
 #   $FIX/create-fail      when present, workspaces create fails with its text as the error
 #   $FIX/create.json      what workspaces create prints (default: workspace w-new, session t-new)
 #   $FIX/create.args      the arguments of the last workspaces create call, one per line
+#   $FIX/no-agents-wait   when present, the CLI has no `agents wait` (an old CLI)
+#   $FIX/agents-wait.log  one line per `agents wait` started: "<pid> <terminal>"
 #   $FIX/screens/<tid>    the text terminals read returns for terminal <tid>
 set -euo pipefail
 arg() { local want=$1; shift; while (($#)); do [[ $1 == "$want" ]] && { echo "$2"; return; }; shift; done; }
@@ -25,5 +27,16 @@ case "$1 ${2:-}" in
     [[ -f $f ]] || { echo "terminal not found" >&2; exit 1; }
     max=$(arg --max-lines "$@")
     tail -n "${max:-1000}" "$f" | jq -Rsc '{text: .}' ;;
+  "agents wait")
+    [[ ! -f $FIX/no-agents-wait ]] || { echo "unknown command: agents wait" >&2; exit 1; }
+    [[ " $* " == *" --help "* ]] && exit 0
+    t=$(arg --terminal "$@"); limit=$(arg --timeout "$@")
+    echo "$$ $t" >>"$FIX/agents-wait.log"
+    for ((i = 0; i < ${limit:-600} * 10; i++)); do   # until the terminal's agent is not working
+      jq -e --arg t "$t" '[.workspaces[].terminals[] | select(.id == $t and .agent.state != "working")] | length > 0' \
+        "$FIX/snapshot.json" >/dev/null && exit 0
+      sleep 0.1
+    done
+    exit 1 ;;
   *) echo "superset shim: unsupported: $*" >&2; exit 1 ;;
 esac
