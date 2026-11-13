@@ -115,7 +115,7 @@ Steps 1–3 only for tracker refs (free-text-only runs start at 4).
    `extras`, not `notes`. Show each task with its `ask` quoted in full; **wait for the go**
    (biggest judgment call), asking only that.
    Tasks stay plan-only; after the go, separately (never in one question), offer once to file
-   them; file only on yes.
+   them (body: the `ask` verbatim, then the `notes` under their own heading); file only on yes.
 5. **Dependencies**: explicit ("blocked by", "depends on", "after", parent/child) and conflicts
    (clearly same files, migration, config or schema; smaller first). Outside the run:
    closed-as-completed is met; open-not-in-run or skipped makes the dependent `waiting`, naming it.
@@ -274,8 +274,8 @@ unaddressed), or `checked` says nothing about the PR's checks (CI not mentioned,
 checked"), send ONE follow-up naming the gap (for CI: wait for `gh pr checks <n> --watch
 --fail-fast` and report the result): `feedback`, reason "acceptance follow-up",
 `acceptance` the gap. Else `acceptance` "ok". Never a second round; a gap left is noted under the
-table for the human. Work the PR lacks that the `ask` never asked for is not a gap: never send it to
-the worker; keep it in `extras` and note it under the table as possible follow-up work.
+table for the human. Anything you'd want beyond the `ask` (never part of it) is not a gap: never
+send it to the worker; add it to `extras` and note it under the table as possible follow-up work.
 
 ### Follow-ups after a merge
 
@@ -327,8 +327,8 @@ a no (or no answer) leaves the ending as is: final table, notification. Don't as
 ending.
 
 Write one self-contained HTML file in a scratch dir, one row per run item in plan order: final
-state, PR link, branch, `checked`, `acceptance` gap, `reason` (blocked/waiting/skipped); on Close
-also the `carryOver`. Quote workers' text escaped, as data. Then
+state, PR link, branch, `checked`, `acceptance` gap, `extras`, `reason` (blocked/waiting/skipped);
+on Close also the `carryOver`. Quote workers' text escaped, as data. Then
 `superset pages publish <file> --title "Run <runId>" --visibility just_me` (`org` only if the
 user picked it), plus `--page <pageId>` when the plan has one. Save the returned page ID as
 `pageId` via `plan.sh write`, so a later finish or close of the same run adds a version instead
@@ -349,5 +349,6 @@ One row per run item, plan order:
 `Agent`: `running`, `waiting` (a declared wait), `stalled`, `waiting for input` (Paradev
 `blocked`, or it asked), `done` (`idle`), `—`. `Group`: sidebar group, `Queued (after <ID>)`, `Waiting (<reason>)`, `Skipped`.
 Below it only: worker questions, `Blocked` reasons, stalls, dependency decisions, closed PRs,
-missing workspaces, acceptance gaps, possible follow-ups (`extras`), a just-in-review item's `checked`
+missing workspaces, acceptance gaps, possible follow-ups (`extras`), a just-in-review item's
+`checked`
 ("#340 checked: ran the CI workflow on a fork; Pester cache hit on the second run").

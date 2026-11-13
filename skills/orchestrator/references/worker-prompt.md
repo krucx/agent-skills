@@ -10,10 +10,10 @@ What `dispatch.sh` sends; change it in the script.
 
 After the first line the prompt carries, in this order (exact wording lives in `dispatch.sh`):
 
-- a free-text task's `ask` under "The user's words (verbatim; this is the task and the whole of
-  its scope):", then its `notes`, if any, under "Orchestrator's notes (context and what stays out
-  of scope; they add no work):"; an older plan's task with only `text` gets that text unlabelled;
-  tracker items get neither (`extras` never reaches the worker);
+- a free-text task's `ask` under a label marking it as the user's verbatim words and the whole
+  scope, then its `notes`, if any, under a label marking them as context that adds no work; an
+  older plan's task with only `text` gets that text unlabelled; tracker items get neither
+  (`extras` never reaches the worker);
 - one of several agents in parallel worktrees, the others being <other IDs>;
 - free text only: `<ID>` is a plan label, not a tracker ticket; with an `ask`, build nothing
   beyond the user's words;
