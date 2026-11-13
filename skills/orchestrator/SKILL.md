@@ -111,7 +111,8 @@ Steps 1–3 for tracker refs only.
 ## Integration branches
 
 An item's **target** is its integration's `branch`, else the default branch ("Items without
-one" behave as ever; a run may mix both). Humans merge every PR. Stacking, squash-merge rules and
+one" behave as ever; a run may mix both). Humans merge every PR except a green sub-PR into an
+integration branch ([below](#merging-into-an-integration-branch)). Stacking, squash-merge rules and
 rebases all apply against the target. **Never nested**: an integration's `base` is the default
 branch. Request "orchestrate feature: <description>": split into tasks as for free text, add one
 `feature/<slug>` integration (`id` `F1`, `title`, `base`, `pr` null, `state` `open`) and set every
@@ -227,6 +228,26 @@ background work still running is skipped likewise.
 ones run on, noted "built on <ID>, which is <state>". Tell the user once; they unblock it, drop it
 ("start #345 anyway") or skip dependents. Recovered: `waiting` → `queued`.
 
+### Merging into an integration branch
+
+The one exception to "nobody here merges": a sub-PR whose base is an integration branch merges
+once green, so dependents start within minutes and humans review once, on the feature → default
+PR. Never a PR into the default branch. `<skill-dir>/scripts/merge.sh check <plan-file> <ID>`
+decides (`run` also merges with `gh pr merge --merge`; merge commits keep stacked dependents from
+conflicting). Verdicts: `merge` (DONE `checked`, acceptance `ok`, green checks, mergeable, base is
+its integration branch); `wait:` (checks pending or red, conflicting: the worker's to fix; retry
+next cycle); `followup:` (no PR checks and `checked:` shows no passing local test run: ONE
+follow-up asking for a local run, as an acceptance gap, `acceptance` = the gap; never a second);
+`no:` (leave it for humans). Run it each cycle for `in-review` items with an integration.
+
+Once per integration, before its first merge: `merge.sh rules <branch>`. `no-merge-commit`: say
+so, set the integration's `mergeNote` `"human"` and leave its merges to humans. `strict` (branches
+must be up to date): say so once, suggest turning it off for `feature/*` (every sibling's merge
+would otherwise update and rerun CI on each open PR); merges still proceed.
+
+After a merge: the item is `done` (as for `MERGED`): dependents start on the integration branch
+and stacked ones get the rebase follow-up against it.
+
 ### Acceptance check
 
 Once per item, before `in-review`: compare `checked` with the acceptance criteria (free-text: the
@@ -247,7 +268,7 @@ An `in-review` item owes work after another merges (user or worker summary: "red
 user's "follow up on <ID>: …" during review sends at once.
 
 Otherwise `In Review` PRs are the user's: don't read their comments or checks. Nobody here
-approves or merges. Never archive, delete or close a workspace, terminal or worktree; only move
+approves, or merges except as [above](#merging-into-an-integration-branch). Never archive, delete or close a workspace, terminal or worktree; only move
 tags.
 
 ### Run finished

@@ -29,7 +29,9 @@ Codex `$<skill> <ID>`; others `Use the <skill> skill to do <ID>.` Then, in order
 - done = PR checks finished and mergeable: `gh pr checks <n> --watch --fail-fast` (exit code and
   failed names only), tail `gh run view <run-id> --log-failed` on failure (never green logs), fix,
   push, re-watch; confirm `gh pr view <n> --json mergeable,mergeStateStatus,statusCheckRollup`,
-  merging or rebasing the base on conflict; an unfixable check goes in `checked:` by name;
+  merging or rebasing the base on conflict; an unfixable check goes in `checked:` by name; a PR with no checks at all: run the project's
+  tests locally and report them in `checked:` ("no PR checks; local: npm test passed"), since the
+  orchestrator merges a PR into an integration branch on that;
 - end the last message with exactly one block, the marker on its own line (`status.sh` ignores
   mid-sentence markers and blocks still holding `<placeholders>`, so the prompt's own templates
   aren't read as reports):

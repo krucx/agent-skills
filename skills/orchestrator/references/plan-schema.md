@@ -17,7 +17,9 @@
   after a failed workspace creation.
 - `integrations` (optional; older plans lack it): feature branches that collect a run's PRs.
   `branch`: `feature/<slug>`; `base`: always the repo's default branch (integrations never nest);
-  `pr`: the PR that lands it on `base`, once opened; `state`: `open`|`merged`. Item `integration`:
+  `pr`: the PR that lands it on `base`, once opened; `state`: `open`|`merged`; `mergeNote`
+  (optional): `"human"` when its rulesets forbid merge commits (the orchestrator then leaves the
+  sub-PR merges to humans), `"strict"` once the up-to-date requirement was reported. Item `integration`:
   an integration's `id`, or `null`/absent for an item targeting the default branch. An item's
   **target** is its integration's `branch`, else the default branch; one run may mix both.
 - `pageId`: the run-summary page, once published; later [summaries](../SKILL.md#run-summary) pass
