@@ -72,6 +72,8 @@ Every workspace has exactly one tag (sidebar folder): its group's tag from the p
 
 - Refs, mixable: `340-343` (inclusive), `345 onwards` (open items ≥ 345), `#350`, `ENG-123`,
   `PROJ-7`; or free text ("orchestrate: add CSV export, fix the login redirect, …").
+- `feature: <description>` ("orchestrate feature: add CSV export"): free text whose tasks all
+  target one [integration branch](#integration-branches).
 - Options, per run or subset ("340-343 using /implement, 344-345 using /implement-spec"):
   `using /<skill>` (default `implement`), `with codex` (default: your harness), `with 3 agents`
   (default and max 5), `with prompts` (regular preset).
@@ -98,10 +100,26 @@ Steps 1–3 for tracker refs only.
    closed-as-completed = met; open or skipped → dependent `waiting`, naming it.
 6. **Waves** ≤ parallel limit: independent first, preferring unblockers.
 7. **Save** (`plan.sh write`); `runId` = start time `YYYYMMDD-HHMM`.
-8. **Show** a short table (item, title, wave, depends on, skill, agent) and dispatch at once; ask
+8. **Show** a short table (item, title, wave, depends on, **target**, skill, agent) and dispatch at once; ask
    instead on a dependency cycle or if two items might be one PR. An
    [auto-only](#worker-agents-and-auto-approval) harness without an `autoOnly` answer: hold its
-   items, ask below the table, dispatch on the reply.
+   items, ask below the table, dispatch on the reply. A run with an integration branch waits for
+   the go instead: it asks **once** where the independent items (no dependencies) go, "straight
+   to `main`" or "into `feature/<slug>`" (the latter puts chains on it too, as one integration).
+   Per-item moves ("#344 straight to main") are applied and the table shown again.
+
+## Integration branches
+
+An item's **target** is its integration's `branch`, else the default branch ("Items without
+one" behave as ever; a run may mix both). Humans merge every PR. Stacking, squash-merge rules and
+rebases all apply against the target. **Never nested**: an integration's `base` is the default
+branch. Request "orchestrate feature: <description>": split into tasks as for free text, add one
+`feature/<slug>` integration (`id` `F1`, `title`, `base`, `pr` null, `state` `open`) and set every
+task's `integration` to it. Otherwise integrations arise from the go message below: independent
+items to the feature branch means one `feature/<runId-slug>` integration for the whole run,
+chains included (dependents wait for their parent's merge into it); independent items to `main`
+means each chain may get its own integration. The user may move single items ("#344 straight to
+main": `integration` null; "#344 into the feature branch").
 
 ## Worker agents and auto-approval
 
@@ -141,14 +159,15 @@ merge.
 **Squash-merge repos**: a stacked branch conflicts once its parent squash-merges. Once per run:
 `gh repo view --json squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed` (plus any
 base-branch ruleset restricting methods). Squash only: don't stack; the dependent waits for the
-merge, then starts on `main`; if the user says the dependency is only a soft ordering, start it on `main` at once. Else stack.
+merge, then starts on its target; if the user says the dependency is only a soft ordering, start it on its target at once. Else stack.
 
 `<skill-dir>/scripts/dispatch.sh <project-id> <plan-file> <ID> [--base <branch>] [--preset <id>]`
 runs steps branch, plan, workspace, record: picks a free branch (`issue-340-<slug>`, `eng-123-<slug>`, `task-<runId>-t1-<slug>`), writes the
 item `in-progress`, creates the workspace (In Progress tag, [worker prompt](references/worker-prompt.md))
 and records workspace, branch and terminal. A failed create returns it to `queued`; a second
-(`dispatchFailures`) makes it `blocked`. `--base`: a stacked item's unmerged dependency branch
-(omit for the default branch). `--preset`: auto instance or preset ID (default: the item's
+(`dispatchFailures`) makes it `blocked`. Creates the item's integration branch on the remote
+from its `base` if missing. `--base`: a stacked item's unmerged dependency branch (omit to start
+from the item's target). `--preset`: auto instance or preset ID (default: the item's
 `agent`). Prints `dispatched …` or `dispatch <ID> failed at <step>: …` (exit 1); after a
 `rollback` or `record` failure, fix the plan by hand first. Never dispatch by hand; change the
 prompt in `dispatch.sh`.
@@ -199,9 +218,9 @@ background work still running is skipped likewise.
 | `blocked` with `reason` (fatal banner) | `blocked` with that reason, free the slot, tell the user. |
 | `blocked` (needs input) | Show the screen's exact question, desktop-notify. The user answers in the worker's chat (relay with send if in yours). Never answer permission prompts or decide scope/product. |
 | `in-progress`, `idle`, no PR, no wait | BLOCKED block, or a follow-up already sent: `blocked` with its reason, free the slot, tell the user. Else one follow-up: finish and open the PR. |
-| PR `MERGED` | `done`; unstarted dependents base on `main`; send follow-ups waiting on it. |
+| PR `MERGED` | `done`; unstarted dependents start on their own target; send follow-ups waiting on it. |
 | PR `CLOSED` unmerged | `blocked`, "PR closed unmerged"; tell the user. |
-| Stacked PR `CONFLICTING (base <parent>)`, parent `done` | Send, unasked: `git fetch origin && git rebase --onto origin/main <parent tip> HEAD`, `git push --force-with-lease`, drop "merge <parent> first" from the PR description. `feedback`, "follow-up sent". Once per item; still conflicting: tell the user. |
+| Stacked PR `CONFLICTING (base <parent>)`, parent `done` | Send, unasked: `git fetch origin && git rebase --onto origin/<target> <parent tip> HEAD`, `git push --force-with-lease`, drop "merge <parent> first" from the PR description. `feedback`, "follow-up sent". Once per item; still conflicting: tell the user. |
 
 **Dependency fails** (`blocked`, `skipped`, PR closed unmerged): queued dependents → `waiting`,
 "waiting on <ID>: <its reason>"; never start, re-plan or un-depend them yourself. Started (stacked)

@@ -4,7 +4,9 @@
 {"repo": "owner/repo", "runId": "20261112-2015", "status": "active", "maxParallel": 5,
  "autoApprove": true, "presets": {"claude": ["auto"]}, "autoOnly": {"claude": "accepted"},
  "groups": {"In Progress": "in progress", "Blocked": "new group-6", …},
- "items": [{"id": "#340", "title": "…", "ask": null, "notes": null, "extras": null, "dependsOn": [],
+ "integrations": [{"id": "F1", "title": "…", "branch": "feature/<slug>", "base": "main", "pr": null,
+ "state": "open"}],
+ "items": [{"id": "#340", "title": "…", "integration": null, "ask": null, "notes": null, "extras": null, "dependsOn": [],
  "why": "", "skill": "implement", "agent": "claude", "preset": "auto", "state": "queued",
  "branch": null, "workspace": null, "terminal": null, "pr": null, "checked": null,
  "acceptance": null, "followUp": null}]}
@@ -13,6 +15,11 @@
 - `status`: `active`|`finished`. `state`, `reason`: see SKILL.md. `plan.sh` adds `owner`,
   `heartbeat`, `takenOverFrom`, `forcedAt`, `carryOver`; `dispatch.sh` adds `dispatchFailures`
   after a failed workspace creation.
+- `integrations` (optional; older plans lack it): feature branches that collect a run's PRs.
+  `branch`: `feature/<slug>`; `base`: always the repo's default branch (integrations never nest);
+  `pr`: the PR that lands it on `base`, once opened; `state`: `open`|`merged`. Item `integration`:
+  an integration's `id`, or `null`/absent for an item targeting the default branch. An item's
+  **target** is its integration's `branch`, else the default branch; one run may mix both.
 - `pageId`: the run-summary page, once published; later [summaries](../SKILL.md#run-summary) pass
   it as `--page` to add a version.
 - `ask`: a free-text task's slice of the user's request, verbatim: the task and its whole scope

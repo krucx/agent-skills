@@ -415,6 +415,46 @@ dispatch_sandbox
 dispatch >/dev/null 2>&1
 expect_not "tracker item: no user's-words label" "$(cat "$FIX/create.args")" "The user's words"
 
+# integration branch: created from its base when missing; items start on it, or on a parent when stacked
+integ_plan() { # integ_plan: #20 targets integration f1 (feature/csv)
+  plan_with "[$(jq -nc '{id: "#20", title: "Add CSV export", state: "queued", branch: null, integration: "f1"}')]" \
+    '{"integrations": [{"id": "f1", "title": "CSV", "branch": "feature/csv", "base": "main", "pr": null, "state": "open"}]}'
+}
+dispatch_sandbox
+git push -q origin HEAD:refs/heads/main
+integ_plan
+out=$(dispatch 2>&1)
+expect "integration: item dispatches" "$out" "dispatched #20 -> issue-20-add-csv-export "
+expect "integration: branch created on the remote from its base" \
+  "$(git ls-remote --heads origin feature/csv | cut -f1)" "$(git rev-parse HEAD)"
+args=$(cat "$FIX/create.args")
+expect "integration: item starts from the integration branch" "$args" $'--base-branch\nfeature/csv'
+expect "integration: PR targets it" "$args" 'gh pr create --base feature/csv'
+expect_not "integration: not stacked" "$args" "Stacked:"
+git commit -q --allow-empty -m moved && git push -q origin HEAD:refs/heads/main
+dispatch_sandbox_again() { integ_plan; rm -f "$FIX/create.args"; }
+dispatch_sandbox_again
+before=$(git ls-remote --heads origin feature/csv | cut -f1)
+dispatch >/dev/null 2>&1
+expect "integration: an existing branch is left alone" "$(git ls-remote --heads origin feature/csv | cut -f1)" "$before"
+dispatch_sandbox
+git push -q origin HEAD:refs/heads/main
+integ_plan
+out=$(dispatch --base issue-19-dep 2>&1)
+args=$(cat "$FIX/create.args")
+expect "integration stacked: starts from the parent" "$args" $'--base-branch\nissue-19-dep'
+expect "integration stacked: rebases onto the target" "$args" "git rebase --onto origin/feature/csv <that tip>"
+expect "integration stacked: PR targets the integration" "$args" 'gh pr create --base feature/csv'
+expect_not "integration stacked: no hard-coded main" "$args" "origin/main"
+dispatch_sandbox
+plan_with "[$(jq -nc '{id: "#20", title: "Add CSV export", state: "queued", integration: "gone"}')]"
+expect "integration: unknown id fails" "$(dispatch 2>&1)" "not in the plan"
+dispatch_sandbox
+dispatch --base issue-19-dep >/dev/null 2>&1
+args=$(cat "$FIX/create.args")
+expect "no integration: stacked rebases onto main" "$args" "git rebase --onto origin/main <that tip>"
+expect "no integration: PR targets main" "$args" 'gh pr create --base main'
+
 # zsh too, when installed
 if command -v zsh >/dev/null; then
   dispatch_sandbox
