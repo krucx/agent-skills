@@ -10,9 +10,13 @@ What `dispatch.sh` sends; change it in the script.
 
 After the first line the prompt carries, in this order (exact wording lives in `dispatch.sh`):
 
-- a free-text task's full `text` (tracker items have none);
+- a free-text task's `ask` under "The user's words (verbatim; this is the task and the whole of
+  its scope):", then its `notes`, if any, under "Orchestrator's notes (context and what stays out
+  of scope; they add no work):"; an older plan's task with only `text` gets that text unlabelled;
+  tracker items get neither (`extras` never reaches the worker);
 - one of several agents in parallel worktrees, the others being <other IDs>;
-- free text only: `<ID>` is a plan label, not a tracker ticket;
+- free text only: `<ID>` is a plan label, not a tracker ticket; with an `ask`, build nothing
+  beyond the user's words;
 - stay within `<ID>`, no drive-by changes; put `<branch>` in Docker Compose project names,
   container names, scratch or data directories and temp files, and bind no fixed host ports;
 - stacked only: the branch starts from `<branch>` (PR #<m>, unmerged); say "Stacked on #<m>; merge

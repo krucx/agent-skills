@@ -41,7 +41,9 @@ item() { jq -r --arg id "$id" ".items[] | select(.id == \$id) | $1" "$plan"; }
 state=$(item .state)
 [[ $state == queued ]] || fail preflight "item is $state, not queued"
 title=$(item '.title // ""')
-text=$(item '.text // ""')
+text=$(item '.text // ""')  # an older plan's single free-text description
+ask=$(item '.ask // ""')    # a free-text task's slice of the user's request, verbatim
+notes=$(item '.notes // ""')
 skill=$(item '.skill // "implement"')
 agent=$(item '.agent // "claude"')
 run=$(jq -r '.runId' "$plan")
@@ -54,7 +56,7 @@ base=${base:-$default_base}
 
 # --- 1. branch ------------------------------------------------------------------------------
 lower=$(printf '%s' "$id" | tr 'A-Z' 'a-z')
-if [[ -n $text || $lower == t[0-9]* ]]; then prefix="task-$run-$lower"
+if [[ -n $ask || -n $text || $lower == t[0-9]* ]]; then prefix="task-$run-$lower"
 elif [[ $lower == \#* ]]; then prefix="issue-${lower#\#}"
 else prefix=$lower; fi
 slug=$(printf '%s' "$title" | tr 'A-Z' 'a-z' | LC_ALL=C sed 's/[^a-z0-9]\{1,\}/ /g' |
@@ -103,11 +105,22 @@ esac
 others=$(jq -r --arg id "$id" '[.items[] | select(.id != $id) | .id] | join(", ")' "$plan")
 {
   printf '%s\n\n' "$first"
-  [[ -z $text ]] || printf '%s\n\n' "$text"
+  if [[ -n $ask ]]; then
+    printf '%s\n%s\n\n' "The user's words (verbatim; this is the task and the whole of its scope):" "$ask"
+    [[ -z $notes ]] || printf '%s\n%s\n\n' \
+      "Orchestrator's notes (context and what stays out of scope; they add no work):" "$notes"
+  else
+    [[ -z $text ]] || printf '%s\n\n' "$text"
+  fi
   printf '%s\n' "You are one of several agents working on this repo in parallel, each in its own worktree. An" \
     "orchestrator coordinates the run; the others are working on ${others:-no other items}."
-  [[ -z $text ]] || printf '%s\n' "- $id is a label in this run's plan only, not a tracker ticket. The" \
-    "  task is the text above; don't fetch $id from any tracker."
+  if [[ -n $ask ]]; then
+    printf '%s\n' "- $id is a label in this run's plan only, not a tracker ticket. The" \
+      "  task is the user's words above; don't fetch $id from any tracker. Build nothing beyond them."
+  elif [[ -n $text ]]; then
+    printf '%s\n' "- $id is a label in this run's plan only, not a tracker ticket. The" \
+      "  task is the text above; don't fetch $id from any tracker."
+  fi
   printf '%s\n' "- Stay within $id. Don't make drive-by changes elsewhere: other branches are editing this code" \
     "  at the same time." \
     "- Keep shared machine resources apart from the other workers: put $branch in Docker Compose" \
