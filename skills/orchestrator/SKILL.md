@@ -78,6 +78,7 @@ harness with only an auto instance, the user's answer (`"accepted"`, or `"declin
 not asked yet. `checked`: worker's `checked:` line.
 `acceptance`: `null`, `"ok"`, or the [gap](#acceptance-check). `followUp`: `null` or
 `{"after": "<ID>", "message": "<text>"}` ([after a merge](#follow-ups-after-a-merge)).
+`dispatchFailures`: set by `dispatch.sh` after a failed workspace creation.
 
 Facts (workspace, branch, agent and PR state) come from Paradev and GitHub; intent (items,
 dependencies, skill, agent, why waiting/blocked/skipped) from the plan. Write the plan, then the
