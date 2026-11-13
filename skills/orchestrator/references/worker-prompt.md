@@ -18,11 +18,11 @@ Codex `$<skill> <ID>`; others `Use the <skill> skill to do <ID>.` Then, in order
   so the PR conflicts until then);
 - the goal is an open PR: push and `gh pr create` even if the skill stops at a commit; ask a human
   decision plainly and stop;
-- the same obstacle twice (same failing command or missing access): stop, print BLOCKED with
+- the same obstacle twice (same failing command or missing access): stop, print `ORCHESTRATOR_WORKER_BLOCKED` with
   `reason:` the obstacle, `needs:` what clears it; once the PR is open, an unfixable PR check is
   not an obstacle but goes in `checked:` (a block after the PR exists would land in `in-review`);
 - before ending a turn with its own background work running (e.g. code-review subagents), or
-  waiting on something external that clears itself: print the WAITING block once per wait, never
+  waiting on something external that clears itself: print `ORCHESTRATOR_WORKER_WAITING` (below) once per wait, never
   per poll or while implementing. Waiting is not blocked (a block needs the orchestrator or user);
   what it waits on failing is an obstacle; a later DONE/BLOCKED block replaces the wait;
 - done = PR checks finished and mergeable: `gh pr checks <n> --watch --fail-fast` (exit code and

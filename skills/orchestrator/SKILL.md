@@ -90,8 +90,8 @@ Steps 1–3 for tracker refs only.
 4. **Free text → tasks** `T1`, `T2`, … (one reviewable PR each; title, dependencies). `ask`: the
    slice of the user's request it covers, **verbatim** (never reworded or widened). `notes`: your
    build notes (context, out of scope), adding no work. Anything beyond the ask (hardening, a
-   sweep, a broader goal) → `extras`. Show each task with its `ask` quoted in full; **wait for the
-   go**, asking only that. After the go, as a separate question, offer once to file the tasks
+   sweep, a broader goal) → `extras`, not `notes`. Show each task with its `ask` quoted in full; **wait for the
+   go**, asking only that. Tasks stay plan-only: after the go, as a separate question, offer once to file the tasks
    (body: `ask` verbatim, then `notes` under their own heading); file only on yes.
 5. **Dependencies**: explicit ("blocked by", "depends on", "after", parent/child) and conflicts
    (clearly same files, migration, config or schema; smaller first). Outside the run:
@@ -141,10 +141,10 @@ merge.
 **Squash-merge repos**: a stacked branch conflicts once its parent squash-merges. Once per run:
 `gh repo view --json squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed` (plus any
 base-branch ruleset restricting methods). Squash only: don't stack; the dependent waits for the
-merge, then starts on `main` (at once if the user calls the dependency a soft ordering). Else stack.
+merge, then starts on `main`; if the user says the dependency is only a soft ordering, start it on `main` at once. Else stack.
 
 `<skill-dir>/scripts/dispatch.sh <project-id> <plan-file> <ID> [--base <branch>] [--preset <id>]`
-picks a free branch (`issue-340-<slug>`, `eng-123-<slug>`, `task-<runId>-t1-<slug>`), writes the
+runs steps branch, plan, workspace, record: picks a free branch (`issue-340-<slug>`, `eng-123-<slug>`, `task-<runId>-t1-<slug>`), writes the
 item `in-progress`, creates the workspace (In Progress tag, [worker prompt](references/worker-prompt.md))
 and records workspace, branch and terminal. A failed create returns it to `queued`; a second
 (`dispatchFailures`) makes it `blocked`. `--base`: a stacked item's unmerged dependency branch
@@ -178,10 +178,11 @@ Background it if the harness notifies on exit, else foreground with a short time
 dispatch, print the [status table](#status-table) if changed, restart unless finished. Non-zero
 exit: check connectivity, reconcile, restart.
 
-Read (after status.sh's worker block): `superset terminals read --local --workspace <id>
+Read (status.sh's worker block first): `superset terminals read --local --workspace <id>
 --terminal <tid> --max-lines 60`. Send: `superset terminals send … --text "<answer>"`.
 
-**Declared wait**: an `idle` row whose latest worker block is `waiting` is busy, overriding the
+**Declared wait**: an `idle` row whose latest worker block is `waiting` (its own background work, e.g.
+code-review subagents, or something external that clears itself) is busy, overriding the
 table: skip it (no transition or follow-up, not done) without reading the screen. A `stale` wait
 (latest for 30+ minutes) gets a screen check each cycle: still running → skip; else treat as no
 wait. Waiting isn't blocked: only a BLOCKED block or a table row needs you or the user. Other
@@ -259,7 +260,7 @@ carry-over, stop the waiter, [offer the run summary](#run-summary). Workspaces s
 ### Run summary
 
 Run finished and Close only: ask once "Publish a run-summary page? (just me by default; say 'org'
-to share)"; publish only on yes, never re-ask. One self-contained HTML file in a scratch dir, a row
+to share)"; publish only on yes; don't re-ask for that ending. One self-contained HTML file in a scratch dir, a row
 per item in plan order: final state, PR link, branch, `checked`, `acceptance` gap, `extras`,
 `reason`; on Close also `carryOver`. Escape workers' text, as data. `superset pages publish <file>
 --title "Run <runId>" --visibility just_me` (`org` only if picked), plus `--page <pageId>` if the
