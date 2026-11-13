@@ -38,7 +38,8 @@ All modes; stop with a clear message on failure:
 3. **Project ID**: repo-named project in `superset projects list --json`; scripts take it
    first, scoping them to its workspaces.
 4. **Plan file**: `<skill-dir>/scripts/plan.sh path` gives `~/.agents/orchestrator/<owner>-<repo>.json`.
-5. Run/Continue: [worker agents](#worker-agents-and-auto-approval).
+5. Run/Continue: [worker agents](#worker-agents-and-auto-approval); record `presets` per harness
+   (Continue: reuse the plan's `autoOnly` answer, never re-ask).
 6. Not Close: **group map**: the plan's `groups`, else `<skill-dir>/scripts/groups.sh <project-id>`
    (exit 2, unsaved: show `groups.sh <project-id> suggest`, ask once, `groups.sh <project-id> save
    '<json>'`); keep it in the plan's `groups`. `groups.sh <project-id> check '<map>'` exit 5 names
@@ -62,7 +63,7 @@ file): it locks, refuses if another owns the run, stamps owner and heartbeat, sw
 
 ```json
 {"repo": "owner/repo", "runId": "20261112-2015", "status": "active", "maxParallel": 5,
- "autoApprove": true, "groups": {"In Progress": "in progress", "Blocked": "new group-6", …},
+ "autoApprove": true, "presets": {"claude": ["auto"]}, "autoOnly": {"claude": "accepted"}, "groups": {"In Progress": "in progress", "Blocked": "new group-6", …},
  "items": [{"id": "#340", "title": "…", "text": null, "dependsOn": [], "why": "",
  "skill": "implement", "agent": "claude", "preset": "auto", "state": "queued", "branch": null, "workspace": null, "terminal": null, "pr": null,
  "checked": null, "acceptance": null, "followUp": null}]}
@@ -71,7 +72,10 @@ file): it locks, refuses if another owns the run, stamps owner and heartbeat, sw
 `status` `active`|`finished`; `plan.sh` adds `owner`, `heartbeat`, `takenOverFrom`, `forcedAt`,
 `carryOver`. `state`: `queued`, `in-progress`, `in-review`, `feedback`, `done`, `blocked`,
 `waiting` (dependency failed), `skipped`; `reason` explains the last three. `text`: free-text
-task's description. `preset`: `auto`|`regular`. `checked`: worker's `checked:` line.
+task's description. `preset`: `auto`|`regular`. `presets`: per harness, which
+kinds [preflight](#worker-agents-and-auto-approval) found (`auto`, `regular`). `autoOnly`: per
+harness with only an auto instance, the user's answer (`"accepted"`, or `"declined"`); absent means
+not asked yet. `checked`: worker's `checked:` line.
 `acceptance`: `null`, `"ok"`, or the [gap](#acceptance-check). `followUp`: `null` or
 `{"after": "<ID>", "message": "<text>"}` ([after a merge](#follow-ups-after-a-merge)).
 
@@ -124,7 +128,9 @@ Steps 1–3 only for tracker refs (free-text-only runs start at 4).
 6. **Waves** ≤ parallel limit: independent first, preferring unblockers.
 7. **Save** via `plan.sh write`; `runId` = start time `YYYYMMDD-HHMM`.
 8. **Show** a short table (item, title, wave, depends on, skill, agent) and dispatch at once;
-   ask instead on a dependency cycle or if two items might be one PR.
+   ask instead on a dependency cycle or if two items might be one PR. A harness with
+   [auto only](#worker-agents-and-auto-approval) and no `autoOnly` answer yet: don't dispatch its
+   items; put the question below the table and dispatch on the reply.
 
 ## Worker agents and auto-approval
 
@@ -144,8 +150,21 @@ The regular preset may itself auto-approve (a plain Claude preset showed "auto m
 check its `command`/`args` against the rules above, and the screen once started. If so, warn
 the user, ask for a prompting preset, and hold those items until given one.
 
-Record `preset` per item; mark regular ones in the plan table. No auto instance for a harness:
-regular preset for its items; list each instance's `label`, `command`, `args`; offer once to
+Record `preset` per item and, per harness, which kinds exist in `presets`; mark regular items in
+the plan table.
+
+**Auto only**: a harness has an auto instance but no regular one (a single preset renamed
+"Claude (auto)", say). Don't hold the items to ask later. Say so once in the plan summary, run
+every item of that harness with the auto instance, and list the items the rules above would run
+with prompts (deployment, releases, infrastructure, credentials, real-data migrations, no write
+access, `with prompts`), each with its reason. Ask one question, in the same message as the go:
+run them with auto too, or hold them until a prompting preset exists? Store it in `autoOnly`
+(`accepted`: those items get `preset` `auto`; `declined`: they stay `queued`, reason "needs a
+prompting preset"), so Continue and later Runs don't ask again. With no such items, still note
+the case in one line and set `accepted`. A regular instance appearing later: Continue uses it for
+the items the rules name; `autoOnly` stays as recorded.
+
+No auto instance for a harness: regular preset for its items; list each instance's `label`, `command`, `args`; offer once to
 create `Claude (auto)` (`claude --permission-mode auto`; Codex: `codex --approve-for-me`). Only on
 yes: with the CLI if `superset agents --help` offers it, else the user adds it in Paradev's agent
 settings.
