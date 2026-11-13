@@ -210,12 +210,21 @@ orchestrator coordinates the run; the others are working on <other IDs>.
 - Your goal is an open pull request. When the work is committed, push the branch and open the
   PR yourself (`gh pr create`), even if your skill stops at a commit. If you need a decision
   from a human, ask it plainly and stop.
+- You are done when the PR's checks have finished and it is mergeable, not when it is open.
+  Before printing ORCHESTRATOR_WORKER_DONE, run `gh pr checks <n> --watch --fail-fast` and read
+  only its exit code and the names of failed checks. For a failed check, tail
+  `gh run view <run-id> --log-failed` (never fetch logs of green checks), fix what your change
+  caused, push, and watch again. Then confirm the base is not conflicting: `gh pr view <n>
+  --json mergeable,mergeStateStatus,statusCheckRollup --jq '{mergeable, mergeStateStatus,
+  failing: [.statusCheckRollup[] | select(.conclusion=="FAILURE") | .name]}'`. On a conflict,
+  merge or rebase the base and push. A check you cannot fix goes in `checked:` by name.
 - Finish your last message with exactly one of:
   ORCHESTRATOR_WORKER_DONE
   item: <ID>
   pr: <url>
   summary: <one line>
-  checked: <how you verified the work against the task>
+  checked: <what you verified against the task, and the PR's checks in a few words ("5/5
+    green"); name only the checks that were red or skipped>
   or
   ORCHESTRATOR_WORKER_BLOCKED
   item: <ID>
@@ -279,7 +288,9 @@ it, drop it ("start #345 anyway") or skip dependents. Recovered: `waiting` depen
 Once per item, before `in-review`: compare `checked` with the issue's acceptance criteria and the
 PR's files (`gh pr view <n> --json files -q '.files[].path'`: names and counts, never code). If it
 plainly covers less (whole file groups unmentioned, e.g. 4 of 24 screenshots, or criteria
-unaddressed), send ONE follow-up naming the gap: `feedback`, reason "acceptance follow-up",
+unaddressed), or `checked` says nothing about the PR's checks (CI not mentioned, or "not
+checked"), send ONE follow-up naming the gap (for CI: wait for `gh pr checks <n> --watch
+--fail-fast` and report the result): `feedback`, reason "acceptance follow-up",
 `acceptance` the gap. Else `acceptance` "ok". Never a second round; a gap left is noted under the
 table for the human.
 
