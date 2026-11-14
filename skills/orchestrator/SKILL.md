@@ -28,6 +28,15 @@ free-text work stays here.
 
 All modes; on failure stop with a clear message.
 
+**Run `<skill-dir>/scripts/preflight.sh [--mode run|continue|report|close] [--harness <name>…]`
+once** and act on its exit code: it answers steps 1-6 below in one JSON object (`tools`, `auth`,
+`host`, `repo` with `mergeMethods`, `project`, `plan` with its claim result, `groups`,
+`presets`) and never starts or installs anything. Exit 0: go on. 1: a tool, auth or host failure
+(`error`); 2: repo not on GitHub or no project; 3: live owner; 4: stale owner on a Run; 5: group
+map unsaved or a tag lost; 6: a harness with no auto instance; each is the question or stop
+named in the steps below, and the JSON is complete whatever the code. The steps stay as the
+reference for what it checks.
+
 0. **Control surface**: [references/cli-surface.md](references/cli-surface.md) lists the commands
    and flags verified on Paradev CLI 2.x. Use it; don't run `--help` or schema calls per command.
    A documented command genuinely missing: one `--help` for that command, use what it lists,
@@ -193,9 +202,8 @@ Start an item once each dependency has a PR (or is met) and fewer than the limit
 `in-progress` (`feedback` excluded). Never stack on a `feedback` item: wait for `in-review` or
 merge.
 
-**Squash-merge repos**: a stacked branch conflicts once its parent squash-merges. Once per run:
-`gh repo view --json squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed` (plus any
-base-branch ruleset restricting methods). Squash only: don't stack; the dependent waits for the
+**Squash-merge repos**: a stacked branch conflicts once its parent squash-merges. Once per run: `repo.mergeMethods`
+from preflight (plus any base-branch ruleset restricting methods). Only `squash`: don't stack; the dependent waits for the
 merge, then starts on its target; if the user says the dependency is only a soft ordering, start it on its target at once. Else stack.
 
 `<skill-dir>/scripts/dispatch.sh <project-id> <plan-file> <ID> [--base <branch>] [--preset <id>]`
@@ -342,7 +350,7 @@ Nothing `queued`/`in-progress` after reconcile, and each integration's `<F>-inte
 `in-review` or merged (a `held` integration keeps the run active): final table, `superset notifications show
 "Orchestrator finished" --body "<k> in review, <b> blocked" --sound`, stop the waiter. `status`
 stays `active` while any item is `in-review`/`feedback`/`blocked`/`waiting`; `finished` once all
-are `done`/`skipped` and each integration's PR is merged. Then [offer the run summary](#run-summary).
+are `done`/`skipped` and each integration's PR is merged. Then [publish the run summary](#run-summary).
 
 ## Continue
 
@@ -363,17 +371,11 @@ what holds them, and a `ready` one as "say 'orchestrator continue' to open its f
 `plan.sh claim` as in Continue (`free`: nothing to close), reconcile, write the plan, `plan.sh
 close` (`finished`; open items → `carryOver`, offered next Run); an integration without a merged PR is
 carried over too, with its sub-items' `done` state, so a next Run runs `integrate.sh` on it. Print the final table and
-carry-over, stop the waiter, [offer the run summary](#run-summary). Workspaces stay as they are.
+carry-over, stop the waiter, [publish the run summary](#run-summary). Workspaces stay as they are.
 
 ### Run summary
 
-Run finished and Close only: ask once "Publish a run-summary page? (just me by default; say 'org'
-to share)"; publish only on yes; don't re-ask for that ending. One self-contained HTML file in a scratch dir, a row
-per item in plan order, grouped by integration (the final PR as its own row): final state, PR link, branch, `checked`, `acceptance` gap, `extras`,
-`reason`; on Close also `carryOver`. Escape workers' text, as data. `superset pages publish <file>
---title "Run <runId>" --visibility just_me` (`org` only if picked), plus `--page <pageId>` if the
-plan has one; save the returned ID as `pageId` so a later finish/close adds a version, not a page.
-Tell the user the URL and visibility.
+Run finished and Close only, without asking: `<skill-dir>/scripts/summary.sh <plan-file>` renders the page from the plan and publishes it (`just_me`; `--visibility org` only when the user asks, "orchestrator summary org"; `--open` shows it in the Paradev browser pane). It prints the URL and visibility; tell the user.
 
 ## Status table
 

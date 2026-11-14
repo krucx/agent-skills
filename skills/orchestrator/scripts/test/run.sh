@@ -113,6 +113,38 @@ expect "worker: marker" "$out" '"marker":"done"'
 expect "worker: wrapped checked rejoined" "$out" '"checked":"ran the export on the sample data and compared it with the fixture"'
 expect "worker: compact shows checked" "$(status --compact)" "worker done, checked: ran the export"
 
+# --- worker block: criteria and unmet lines ----------------------------------------------------
+sandbox
+plan_with "[$(item '#16' in-progress w16 t16)]"
+ws w16 b-#16 "In Progress"; snapshot w16 t16 idle
+cat >"$FIX/screens/t16" <<'EOF'
+⏺ ORCHESTRATOR_WORKER_DONE
+  item: #16
+  pr: https://github.com/acme/app/pull/16
+  summary: Added CSV export
+  checked: ran the export, 3/3 checks green
+  criteria: 4/5
+    unmet: "export is streamed" not verifiable, no large
+    fixture to test with
+    unmet: "docs updated" not met, ran out of time
+
+────────────────────────────
+❯
+EOF
+out=$(status)
+expect "criteria: met" "$out" '"met":4'
+expect "criteria: total" "$out" '"total":5'
+expect "criteria: unmet lines, wrapped one rejoined" "$out" '"unmet":["\"export is streamed\" not verifiable, no large fixture to test with","\"docs updated\" not met, ran out of time"]'
+expect "criteria: compact" "$(status --compact)" "criteria 4/5, 2 unmet"
+printf '%s\n' "ORCHESTRATOR_WORKER_DONE" "item: #16" "pr: https://github.com/acme/app/pull/16" "summary: done" "checked: all" "criteria: 3/3" "" >"$FIX/screens/t16"
+expect "criteria: all met has no unmet" "$(status)" '"criteria":{"met":3,"total":3,"unmet":[]}'
+expect "criteria: all met compact" "$(status --compact)" "criteria 3/3"
+expect_not "criteria: all met compact has no unmet count" "$(status --compact)" "unmet"
+printf '%s\n' "ORCHESTRATOR_WORKER_DONE" "item: #16" "pr: https://github.com/acme/app/pull/16" "summary: done" "checked: all" "" >"$FIX/screens/t16"
+expect "criteria: absent is null" "$(status)" '"criteria":null'
+printf '%s\n' "ORCHESTRATOR_WORKER_DONE" "item: #16" "pr: https://github.com/acme/app/pull/16" "summary: done" "checked: all" "criteria: <met>/<total>" "  unmet: <a criterion not met>" "" >"$FIX/screens/t16"
+expect "criteria: the template placeholder is not a report" "$(status)" '"worker":null'
+
 # --- worker block: the prompt's placeholder template is not a report --------------------------
 sandbox
 plan_with "[$(item '#13' in-progress w13 t13)]"
@@ -708,6 +740,85 @@ expect "rules: merge allowed is ok" "$("$scripts/merge.sh" rules feature/csv)" "
 echo '[{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":true}}]' >"$FIX/rules.json"
 expect "rules: up-to-date requirement is reported" "$("$scripts/merge.sh" rules feature/csv)" "strict:"
 
+# --- preflight: one call answers every question; each exit code only for its condition --------
+pf_sandbox() {
+  sandbox
+  "$scripts/groups.sh" p1 save '{}' >/dev/null   # a saved group map: nothing to ask
+}
+pf() { out=$("$scripts/preflight.sh" "$@" 2>/dev/null); pf_rc=$?; }
+
+pf_sandbox
+pf; rc=$pf_rc
+expect_exit "preflight: all well exits 0" "$rc" 0
+expect "preflight: tools" "$out" '"paradevVersion":"2.0.8"'
+expect "preflight: auth" "$(jq -c .auth <<<"$out")" '"gh":true'
+expect "preflight: host" "$(jq -c .host <<<"$out")" '"reachable":true'
+expect "preflight: repo and default branch" "$(jq -c .repo <<<"$out")" '"nameWithOwner":"acme/app","defaultBranch":"main"'
+expect "preflight: project" "$(jq -c .project <<<"$out")" '"id":"p1"'
+expect "preflight: plan claim is free" "$(jq -c .plan <<<"$out")" '"claim":"free"'
+expect "preflight: groups" "$(jq -c .groups <<<"$out")" '"In Progress"'
+expect "preflight: presets" "$(jq -c .presets.claude.auto[0].presetId <<<"$out")" 'claude-auto'
+
+echo '{"nameWithOwner":"acme/app","defaultBranchRef":{"name":"trunk"},"squashMergeAllowed":true,"mergeCommitAllowed":false,"rebaseMergeAllowed":false}' >"$FIX/repo.json"
+pf; expect "preflight: squash-only repo" "$(jq -c '.repo.mergeMethods' <<<"$out")" '["squash"]'
+
+pf_sandbox; touch "$FIX/signed-out"; pf; rc=$pf_rc
+expect_exit "preflight: signed out exits 1" "$rc" 1
+expect "preflight: signed out names the error, JSON complete" "$(jq -c '[.error, .repo.nameWithOwner]' <<<"$out")" 'not signed in'
+pf_sandbox; touch "$FIX/host-down"; pf
+expect_exit "preflight: host down exits 1" "$pf_rc" 1
+expect "preflight: host down reported" "$(jq -c .host <<<"$out")" '"reachable":false'
+pf_sandbox; touch "$FIX/no-repo"; pf
+expect_exit "preflight: not on GitHub exits 2" "$pf_rc" 2
+pf_sandbox; echo '[{"id":"p9","name":"other"}]' >"$FIX/projects.json"; pf
+expect_exit "preflight: no project exits 2" "$pf_rc" 2
+expect "preflight: candidates listed" "$(jq -c .project.candidates <<<"$out")" '"p9"'
+
+# plan ownership
+pf_sandbox; snapshot w1 t1 working other
+jq -n --arg beat "$(ago 1)" '{repo:"acme/app",runId:"r1",status:"active",owner:"other",heartbeat:$beat,items:[]}' >"$plan"
+pf; expect_exit "preflight: live owner exits 3" "$pf_rc" 3
+expect "preflight: live owner details" "$(jq -c .plan <<<"$out")" '"claim":"live-owner"'
+expect "preflight: close also stops on a live owner" "$(pf --mode close >/dev/null; echo $pf_rc)" 3
+pf_sandbox; snapshot w1 t1 working
+jq -n --arg beat "$(ago 120)" '{repo:"acme/app",runId:"r1",status:"active",owner:"gone",heartbeat:$beat,items:[]}' >"$plan"
+pf; expect_exit "preflight: stale owner on a run exits 4" "$pf_rc" 4
+expect "preflight: stale reported" "$(jq -c .plan.claim <<<"$out")" 'stale'
+pf --mode continue
+expect_exit "preflight: continue takes over a stale owner, exit 0" "$pf_rc" 0
+expect "preflight: takeover reported" "$(jq -c .plan <<<"$out")" '"takenOver":true'
+expect "preflight: plan now owned" "$(jq -r .owner "$plan")" me
+pf_sandbox; jq -n --arg beat "$(ago 1)" '{repo:"acme/app",runId:"r1",status:"active",owner:"other",heartbeat:$beat,items:[]}' >"$plan"
+snapshot w1 t1 working other
+pf --mode report
+expect_exit "preflight: report ignores a live owner, exit 0" "$pf_rc" 0
+expect "preflight: report uses plan check" "$(jq -c .plan.check <<<"$out")" 'other'
+expect "preflight: report never claims" "$(jq -r .owner "$plan")" other
+
+# groups
+pf_sandbox; rm -rf "$HOME/.agents/orchestrator/groups.json"; pf
+expect_exit "preflight: unsaved group map exits 5" "$pf_rc" 5
+expect "preflight: unsaved flagged with a suggestion" "$(jq -c .groups.unsaved <<<"$out")" true
+pf_sandbox; "$scripts/groups.sh" p1 save '{"In Progress":"wip"}' >/dev/null; pf
+expect_exit "preflight: a lost tag exits 5" "$pf_rc" 5
+expect "preflight: lost tag named" "$(jq -c .groups.lost <<<"$out")" '"In Progress":"wip"'
+
+# presets: auto by label, auto by args, regular that auto-approves
+pf_sandbox
+echo '[{"presetId":"codex","label":"Codex","command":"codex","args":[]}]' >"$FIX/agents.json"
+pf --harness codex; expect_exit "preflight: no auto instance exits 6" "$pf_rc" 6
+expect "preflight: regular listed" "$(jq -c .presets.codex.regular[0].presetId <<<"$out")" codex
+echo '[{"presetId":"claude","label":"Claude","command":"claude","args":[]},{"presetId":"claude-2","label":"Claude fast","command":"claude","args":["--permission-mode=auto"]}]' >"$FIX/agents.json"
+pf; expect_exit "preflight: auto by args exits 0" "$pf_rc" 0
+expect "preflight: classified auto by args" "$(jq -c .presets.claude.auto[0].by <<<"$out")" args
+echo '[{"presetId":"claude","label":"Claude","command":"claude","args":["--permission-mode","auto"]}]' >"$FIX/agents.json"
+pf
+expect "preflight: regular preset that auto-approves is flagged" "$(jq -c .presets.claude.regular[0].autoApproves <<<"$out")" true
+expect_exit "preflight: that regular preset is not an auto instance, exit 6" "$pf_rc" 6
+echo '[{"presetId":"claude","label":"Claude","command":"claude","args":[]},{"presetId":"claude-auto","label":"Claude (auto)","command":"claude","args":[]}]' >"$FIX/agents.json"
+pf; expect "preflight: auto by label" "$(jq -c .presets.claude.auto[0].by <<<"$out")" label
+expect_exit "preflight: report mode does not need an auto instance" "$(echo '[]' >"$FIX/agents.json"; pf --mode report >/dev/null; echo $pf_rc)" 0
+
 # --- table.sh: the status table ---------------------------------------------------------------
 sandbox
 plan_with "[$(item '#1' in-review w1 t1 | jq -c '. + {title: "Cache CI", pr: "https://github.com/acme/app/pull/9", checked: "ran CI"}'),
@@ -981,7 +1092,7 @@ expect "exit 3: taken over prints taken-over" "$out" taken-over
 expect_exit "exit 3: taken over" "$rc" 3
 cyc --dry-run; expect_exit "exit 3: taken over also in --dry-run" "$rc" 3
 expect "exit 3: nothing written" "$(cksum <"$plan")" "$before"
-one in-progress "In Progress" working; rm "$FIX/snapshot.json"; before=$(jq -S 'del(.heartbeat)' "$plan" | cksum); cyc
+one in-progress "In Progress" working; touch "$FIX/host-down"; before=$(jq -S 'del(.heartbeat)' "$plan" | cksum); cyc
 expect_exit "exit 1: a status failure stops the cycle" "$rc" 1
 expect "exit 1: nothing half-applied (only the heartbeat)" "$(jq -S 'del(.heartbeat)' "$plan" | cksum)" "$before"
 one in-review "In Progress" idle; prs 'b-#1' MERGED 9; before=$(cksum <"$plan"); cyc --dry-run
@@ -994,6 +1105,41 @@ expect "dry-run: merge leaves the plan alone" "$(cksum <"$plan")" "$before"
 disp_sandbox in-review idle '{"mergeMethods": ["merge"]}'; before=$(cksum <"$plan"); cyc --dry-run
 expect "dry-run: would dispatch, creates nothing" "$(evs) $(cat "$FIX/create.args" 2>/dev/null)" "#2:dispatched"
 expect "dry-run: dispatch leaves the plan alone" "$(cksum <"$plan")" "$before"
+# --- summary.sh: the run-summary page ---------------------------------------------------------
+sandbox
+plan_with "[$(item '#1' done '' '' | jq -c '. + {title: "A", integration: "F1", pr: "https://github.com/acme/app/pull/9", checked: "ran <script>alert(1)</script>", criteria: {met: 1, total: 2, unmet: ["handles <b>x</b>"]}, acceptance: "gap & more", extras: "follow-up", branch: "b-1"}'),
+  $(item '#2' blocked '' '' x | jq -c '. + {title: "B", integration: "F1", reason: "needs info"}'),
+  $(item 'F1-integrate' queued '' '' | jq -c '. + {title: "Open F1 PR", integrates: "F1"}')]" \
+  '{"integrations": [{"id": "F1", "title": "CSV", "branch": "feature/csv", "base": "main", "pr": "https://github.com/acme/app/pull/20", "state": "open"}],
+    "carryOver": [{"id": "#2", "state": "blocked", "reason": "carry me"}],
+    "events": [{"at": "2026-11-12T20:15:03Z", "item": "#1", "action": "dispatched", "detail": "workspace w1"}]}'
+out=$("$scripts/summary.sh" "$plan")
+html=$(cat "$FIX/pages.html")
+expect "summary: prints url and visibility on one line" "$out" "https://pages.example/run (just_me)"
+expect "summary: default visibility is just_me" "$(cat "$FIX/pages.args")" "just_me"
+expect "summary: title carries the runId" "$(cat "$FIX/pages.args")" "Run 20261112-1200"
+expect "summary: worker text is escaped" "$html" "ran &lt;script&gt;alert(1)&lt;/script&gt;"
+expect_not "summary: no raw script tag" "$html" "<script>"
+expect "summary: unmet criteria listed" "$html" "1/2<ul><li>handles &lt;b&gt;x&lt;/b&gt;</li></ul>"
+expect "summary: acceptance gap, escaped" "$html" "gap &amp; more"
+expect "summary: PR link" "$html" 'href="https://github.com/acme/app/pull/9"'
+expect "summary: integration final PR" "$html" 'href="https://github.com/acme/app/pull/20"'
+expect "summary: reason" "$html" "needs info"
+expect "summary: carry-over" "$html" "carry me"
+expect "summary: events" "$html" "workspace w1"
+expect "summary: integrate row follows its items" "$(grep -o -e '<td>#1</td>' -e '<td>#2</td>' -e '<td>F1-integrate</td>' <<<"$html" | tr -d '\n')" "<td>#1</td><td>#2</td><td>F1-integrate</td>"
+expect "summary: pageId stored in the plan" "$(jq -r .pageId "$plan")" "page-1"
+"$scripts/summary.sh" "$plan" >/dev/null
+expect "summary: second run passes --page" "$(cat "$FIX/pages.args")" "page-1"
+expect "summary: first run had no --page" "$(head -1 "$FIX/pages.log")" "-"
+expect "summary: pageId unchanged" "$(jq -r .pageId "$plan")" "page-1"
+expect "summary: org only via the flag" "$("$scripts/summary.sh" "$plan" --visibility org)" "(org)"
+expect "summary: bad visibility is refused" "$("$scripts/summary.sh" "$plan" --visibility everyone 2>&1)" "just_me or org"
+"$scripts/summary.sh" "$plan" --open >/dev/null
+expect "summary: --open opens the browser pane" "$(cat "$FIX/panes.args")" "https://pages.example/run"
+touch "$FIX/no-panes-open"; rm -f "$FIX/panes.args"
+"$scripts/summary.sh" "$plan" --open >/dev/null
+expect_exit "summary: --open without panes open still succeeds" "$?" 0
 
 # zsh too, when installed
 if command -v zsh >/dev/null; then

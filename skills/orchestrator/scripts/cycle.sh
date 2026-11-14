@@ -208,7 +208,8 @@ criteria_from() { # the DONE block's criteria count out of `checked` ("criteria 
 to_accepting() { # to_accepting <id> <why>: the DONE block (or an idle worker with a PR) arrived
   local id=$1 checked crit
   checked=$(rowfield "$id" .worker.checked)
-  crit=$(jq -nc --arg c "$checked" '{checked: $c}' | criteria_from)
+  crit=$(jq -c --arg id "$id" '[.[] | select(.item == $id)][0].worker.criteria // empty' <<<"$ROWS")  # status.sh parses the DONE block's
+  [[ -n $crit ]] || crit=$(jq -nc --arg c "$checked" '{checked: $c}' | criteria_from)  # else the count quoted in checked:
   upd "$id" '.state = "accepting" | .acceptance = "pending" | .reason = null
     | (if $c != "" then .checked = $c else . end)
     | (if $k != null then .criteria = $k else . end)' --arg c "$checked" --argjson k "$crit"
