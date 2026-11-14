@@ -708,6 +708,46 @@ expect "rules: merge allowed is ok" "$("$scripts/merge.sh" rules feature/csv)" "
 echo '[{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":true}}]' >"$FIX/rules.json"
 expect "rules: up-to-date requirement is reported" "$("$scripts/merge.sh" rules feature/csv)" "strict:"
 
+# --- table.sh: the status table ---------------------------------------------------------------
+sandbox
+plan_with "[$(item '#1' in-review w1 t1 | jq -c '. + {title: "Cache CI", pr: "https://github.com/acme/app/pull/9", checked: "ran CI"}'),
+  $(item '#2' queued '' '' | jq -c '. + {title: "Split job", dependsOn: ["#1"]}'),
+  $(item '#3' skipped '' '' | jq -c '. + {title: "Vague"}')]"
+ws w1 b-#1 "In Review"; snapshot w1 t1 idle
+echo '[{"headRefName":"b-#1","number":9,"url":"https://github.com/acme/app/pull/9","state":"MERGED","isDraft":false}]' >"$FIX/prs.json"
+printf 'idle\n' >"$FIX/screens/t1"
+out=$("$scripts/table.sh" proj "$plan")
+expect "table: header" "$out" "| Item | Title | Group | Agent | PR |"
+expect "table: reconciled row uses the PR from status" "$out" "| #1 | Cache CI | In Review | done | #9 |"
+expect "table: queued names its dependency" "$out" "| #2 | Split job | Queued (after #1) | — | — |"
+expect "table: skipped" "$out" "| #3 | Vague | Skipped | — | — |"
+expect "table: in-review item's checked is listed below" "$out" "#1 checked: ran CI"
+expect "table: second run is unchanged" "$("$scripts/table.sh" proj "$plan")" "unchanged"
+expect "table: --force prints it anyway" "$("$scripts/table.sh" --force proj "$plan")" "| #1 | Cache CI |"
+rows=$("$scripts/status.sh" proj "$plan")
+same=$("$scripts/table.sh" --force proj "$plan")
+expect "table: rows from stdin equal status.sh's own" "$("$scripts/table.sh" --force --rows - proj "$plan" <<<"$rows")" "$same"
+echo '[{"headRefName":"b-#1","number":9,"url":"https://github.com/acme/app/pull/9","state":"CLOSED","isDraft":false}]' >"$FIX/prs.json"
+out=$("$scripts/table.sh" proj "$plan")
+expect "table: a changed render prints again" "$out" "#1 PR #9 closed unmerged"
+
+# with integrations: grouped, held header, <F>-integrate last
+sandbox
+plan_with "[$(item '#1' done '' '' | jq -c '. + {title: "A", integration: "F1"}'),
+  $(item '#2' blocked '' '' x | jq -c '. + {title: "B | pipes", integration: "F1", reason: "needs info"}'),
+  $(item 'F1-integrate' queued '' '' | jq -c '. + {title: "Open F1 PR", integrates: "F1", dependsOn: ["#1", "#2"]}'),
+  $(item '#4' queued '' '' | jq -c '. + {title: "Plain"}')]" \
+  '{"integrations": [{"id": "F1", "title": "CSV", "branch": "feature/csv", "base": "main", "pr": null, "state": "open"}]}'
+snapshot none none idle
+out=$("$scripts/table.sh" proj "$plan")
+expect "table: integration header with held items" "$out" "| **F1 feature/csv** (held: #2 blocked) | | | | |"
+expect "table: items under the header" "$out" "| #1 | A | Done | — | — |"
+expect "table: pipes in titles are escaped" "$out" 'B \| pipes'
+expect "table: blocked reason below the table" "$out" "#2 blocked: needs info"
+expect "table: default-branch item stays ungrouped, after the group" "$out" "| #4 | Plain | Queued |"
+order=$(grep -n -e '^| #1 ' -e '^| F1-integrate' -e '^| #4 ' <<<"$out" | cut -d'|' -f2 | tr -d ' \n')
+expect "table: <F>-integrate row is last in its group" "$order" "#1F1-integrate#4"
+
 # zsh too, when installed
 if command -v zsh >/dev/null; then
   dispatch_sandbox
