@@ -28,6 +28,15 @@ free-text work stays here.
 
 All modes; on failure stop with a clear message.
 
+**Run `<skill-dir>/scripts/preflight.sh [--mode run|continue|report|close] [--harness <name>…]`
+once** and act on its exit code: it answers steps 1-6 below in one JSON object (`tools`, `auth`,
+`host`, `repo` with `mergeMethods`, `project`, `plan` with its claim result, `groups`,
+`presets`) and never starts or installs anything. Exit 0: go on. 1: a tool, auth or host failure
+(`error`); 2: repo not on GitHub or no project; 3: live owner; 4: stale owner on a Run; 5: group
+map unsaved or a tag lost; 6: a harness with no auto instance; each is the question or stop
+named in the steps below, and the JSON is complete whatever the code. The steps stay as the
+reference for what it checks.
+
 0. **Control surface**: [references/cli-surface.md](references/cli-surface.md) lists the commands
    and flags verified on Paradev CLI 2.x. Use it; don't run `--help` or schema calls per command.
    A documented command genuinely missing: one `--help` for that command, use what it lists,
@@ -193,9 +202,8 @@ Start an item once each dependency has a PR (or is met) and fewer than the limit
 `in-progress` (`feedback` excluded). Never stack on a `feedback` item: wait for `in-review` or
 merge.
 
-**Squash-merge repos**: a stacked branch conflicts once its parent squash-merges. Once per run:
-`gh repo view --json squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed` (plus any
-base-branch ruleset restricting methods). Squash only: don't stack; the dependent waits for the
+**Squash-merge repos**: a stacked branch conflicts once its parent squash-merges. Once per run: `repo.mergeMethods`
+from preflight (plus any base-branch ruleset restricting methods). Only `squash`: don't stack; the dependent waits for the
 merge, then starts on its target; if the user says the dependency is only a soft ordering, start it on its target at once. Else stack.
 
 `<skill-dir>/scripts/dispatch.sh <project-id> <plan-file> <ID> [--base <branch>] [--preset <id>]`
