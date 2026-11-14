@@ -245,7 +245,14 @@ detection, and prints `{"events", "needs", "finished"}`; only `needs` (accept, q
 dependency-failed, stalled, stale-wait, held, closed-pr) are for you. A DONE block moves an item to `accepting`,
 never straight to `in-review`. The prose below remains the reference for what it does.
 
-`<skill-dir>/scripts/wait-change.sh <project-id> <plan-file>` exits with a one-line summary when a
+`<skill-dir>/scripts/watch.sh <project-id> <plan-file> [timeout-seconds]` runs the whole loop (wait-change.sh,
+then cycle.sh, repeat) without you: background it once and act on its output when it exits. It prints the new
+events (`HH:MM item action detail`, or `events: none`), the `needs` JSON if any, then `needs <n>`, `finished`,
+`taken-over`, `timeout` or `error: <why>` (exit 10, 0, 3, 0, 1). Act on each need, then start it again. Where
+the harness has no background notifications, run it foregrounded with a short timeout. The rewrite of this
+section around it is a later change.
+
+`<skill-dir>/scripts/wait-change.sh [--all-changes] <project-id> <plan-file>` exits with a one-line summary when a
 watched workspace's agent state, tag or PR changes or it vanishes, else after 20 minutes.
 Background it if the harness notifies on exit, else foreground with a short timeout
 (`… <plan-file> 120`). On exit: `plan.sh heartbeat` (stop on exit 3), reconcile, apply transitions,
