@@ -21,7 +21,7 @@ Use this instead of probing; every row below was checked with `--help` or a call
 | Answer a worker | `superset terminals send --workspace <id> --local --terminal <tid> --text "<answer>"` (`--keys` for raw keys, `--no-submit` to stage) |
 | Linear/Paradev task | `superset tasks get <KEY> --tracker linear --json` |
 | Notify | `superset notifications show` |
-| Publish a page | `superset pages publish <file> [--title t] [--label l]` |
+| Publish a page | `superset pages publish <file> [--title t] [--visibility just_me\|org] [--page <id>]` (summary.sh) |
 
 ## Where 2.x differs from the documented 1.x surface
 

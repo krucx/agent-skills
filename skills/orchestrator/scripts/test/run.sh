@@ -748,6 +748,42 @@ expect "table: default-branch item stays ungrouped, after the group" "$out" "| #
 order=$(grep -n -e '^| #1 ' -e '^| F1-integrate' -e '^| #4 ' <<<"$out" | cut -d'|' -f2 | tr -d ' \n')
 expect "table: <F>-integrate row is last in its group" "$order" "#1F1-integrate#4"
 
+# --- summary.sh: the run-summary page ---------------------------------------------------------
+sandbox
+plan_with "[$(item '#1' done '' '' | jq -c '. + {title: "A", integration: "F1", pr: "https://github.com/acme/app/pull/9", checked: "ran <script>alert(1)</script>", criteria: {met: 1, total: 2, unmet: ["handles <b>x</b>"]}, acceptance: "gap & more", extras: "follow-up", branch: "b-1"}'),
+  $(item '#2' blocked '' '' x | jq -c '. + {title: "B", integration: "F1", reason: "needs info"}'),
+  $(item 'F1-integrate' queued '' '' | jq -c '. + {title: "Open F1 PR", integrates: "F1"}')]" \
+  '{"integrations": [{"id": "F1", "title": "CSV", "branch": "feature/csv", "base": "main", "pr": "https://github.com/acme/app/pull/20", "state": "open"}],
+    "carryOver": [{"id": "#2", "state": "blocked", "reason": "carry me"}],
+    "events": [{"at": "2026-11-12T20:15:03Z", "item": "#1", "action": "dispatched", "detail": "workspace w1"}]}'
+out=$("$scripts/summary.sh" "$plan")
+html=$(cat "$FIX/pages.html")
+expect "summary: prints url and visibility on one line" "$out" "https://pages.example/run (just_me)"
+expect "summary: default visibility is just_me" "$(cat "$FIX/pages.args")" "just_me"
+expect "summary: title carries the runId" "$(cat "$FIX/pages.args")" "Run 20261112-1200"
+expect "summary: worker text is escaped" "$html" "ran &lt;script&gt;alert(1)&lt;/script&gt;"
+expect_not "summary: no raw script tag" "$html" "<script>"
+expect "summary: unmet criteria listed" "$html" "1/2<ul><li>handles &lt;b&gt;x&lt;/b&gt;</li></ul>"
+expect "summary: acceptance gap, escaped" "$html" "gap &amp; more"
+expect "summary: PR link" "$html" 'href="https://github.com/acme/app/pull/9"'
+expect "summary: integration final PR" "$html" 'href="https://github.com/acme/app/pull/20"'
+expect "summary: reason" "$html" "needs info"
+expect "summary: carry-over" "$html" "carry me"
+expect "summary: events" "$html" "workspace w1"
+expect "summary: integrate row follows its items" "$(grep -o -e '<td>#1</td>' -e '<td>#2</td>' -e '<td>F1-integrate</td>' <<<"$html" | tr -d '\n')" "<td>#1</td><td>#2</td><td>F1-integrate</td>"
+expect "summary: pageId stored in the plan" "$(jq -r .pageId "$plan")" "page-1"
+"$scripts/summary.sh" "$plan" >/dev/null
+expect "summary: second run passes --page" "$(cat "$FIX/pages.args")" "page-1"
+expect "summary: first run had no --page" "$(head -1 "$FIX/pages.log")" "-"
+expect "summary: pageId unchanged" "$(jq -r .pageId "$plan")" "page-1"
+expect "summary: org only via the flag" "$("$scripts/summary.sh" "$plan" --visibility org)" "(org)"
+expect "summary: bad visibility is refused" "$("$scripts/summary.sh" "$plan" --visibility everyone 2>&1)" "just_me or org"
+"$scripts/summary.sh" "$plan" --open >/dev/null
+expect "summary: --open opens the browser pane" "$(cat "$FIX/panes.args")" "https://pages.example/run"
+touch "$FIX/no-panes-open"; rm -f "$FIX/panes.args"
+"$scripts/summary.sh" "$plan" --open >/dev/null
+expect_exit "summary: --open without panes open still succeeds" "$?" 0
+
 # zsh too, when installed
 if command -v zsh >/dev/null; then
   dispatch_sandbox
