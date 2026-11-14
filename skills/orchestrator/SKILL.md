@@ -364,6 +364,8 @@ Tell the user the URL and visibility.
 
 ## Status table
 
+`scripts/table.sh <project-id> <plan-file>` renders it (`--rows -` takes `status.sh` output on stdin, `--force` re-prints) and prints `unchanged` when nothing moved since the last render; print a table only when it prints one.
+
 A row per item, plan order; with integrations, rows grouped under a bold integration header
 (`**F1 feature/csv** (held: #3 blocked)`), its `<F>-integrate` row last carrying the final PR; items on
 the default branch stay ungrouped:
