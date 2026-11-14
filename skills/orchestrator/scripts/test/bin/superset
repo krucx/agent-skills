@@ -15,6 +15,8 @@
 #   $FIX/agents.json      superset agents list (default: Claude and "Claude (auto)")
 #   $FIX/signed-out       when present, auth whoami fails; $FIX/host-down: snapshot fails
 #   $FIX/screens/<tid>    the text terminals read returns for terminal <tid>
+#   $FIX/tags.log         workspaces update calls: "<workspace> <tag>"; $FIX/send.log: terminals send calls:
+#                         "<terminal> <text>"; $FIX/notify.log: notifications show calls (their arguments)
 set -euo pipefail
 arg() { local want=$1; shift; while (($#)); do [[ $1 == "$want" ]] && { echo "$2"; return; }; shift; done; }
 case "$1 ${2:-}" in
@@ -52,6 +54,9 @@ case "$1 ${2:-}" in
       sleep 0.1
     done
     exit 1 ;;
+  "workspaces update") echo "$3 $(arg --tag "$@")" >>"$FIX/tags.log" ;;
+  "terminals send") echo "$(arg --terminal "$@") $(arg --text "$@")" >>"$FIX/send.log" ;;
+  "notifications show") echo "$*" >>"$FIX/notify.log" ;;
   "pages publish")
     printf '%s\n' "$@" >"$FIX/pages.args"
     echo "$(arg --page "$@")" | sed 's/^$/-/' >>"$FIX/pages.log"

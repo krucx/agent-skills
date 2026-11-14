@@ -859,6 +859,252 @@ expect "table: default-branch item stays ungrouped, after the group" "$out" "| #
 order=$(grep -n -e '^| #1 ' -e '^| F1-integrate' -e '^| #4 ' <<<"$out" | cut -d'|' -f2 | tr -d ' \n')
 expect "table: <F>-integrate row is last in its group" "$order" "#1F1-integrate#4"
 
+# --- cycle.sh ----------------------------------------------------------------------------------
+snap() { # snap <workspace:terminal:state>...
+  local a
+  a=$(printf '%s\n' "$@" | jq -R 'split(":") | {id: .[0], terminals: [{id: .[1], agent: {id: "claude", state: .[2]}}]}' | jq -sc .)
+  jq -n --argjson w "$a" '{workspaces: ($w + [{id: "orch", terminals: []}])}' >"$FIX/snapshot.json"
+}
+prs() { # prs <branch> <state> <number> [extra-json]: the one PR GitHub lists
+  local x=${4:-}; [[ -n $x ]] || x='{}'
+  jq -nc --arg b "$1" --arg s "$2" --argjson n "$3" --argjson x "$x" \
+    '[{headRefName: $b, number: $n, url: "https://github.com/acme/app/pull/\($n)", state: $s, isDraft: false} + $x]' >"$FIX/prs.json"
+}
+# one <state> <tag> <agent-state> [item-json] [plan-json]: a plan with the one item #1 (workspace w1,
+# terminal t1, tagged <tag>; no tag: Paradev no longer has it). maxParallel 0 keeps dispatch out.
+one() {
+  local x=${4:-} p=${5:-}
+  [[ -n $x ]] || x='{}'; [[ -n $p ]] || p='{"maxParallel": 0}'
+  dispatch_sandbox
+  plan_with "[$(item '#1' "$1" w1 t1 | jq -c ". + $x")]" "$p"
+  [[ -z $2 ]] || ws w1 'b-#1' "$2"
+  snap w1:t1:"$3"
+}
+cyc() { out=$("$scripts/cycle.sh" "$@" proj "$plan" 2>"$FIX/cycle.err"); rc=$?; }
+pf() { jq -r --arg id "${2:-#1}" ".items[] | select(.id == \$id) | $1" "$plan"; }
+evs() { jq -r '[.events[] | .item + ":" + .action] | join(" ")' <<<"$out"; }
+needs() { jq -r '[.needs[] | .kind + ":" + .item] | join(" ")' <<<"$out"; }
+done_screen() { printf '%s\n' "ORCHESTRATOR_WORKER_DONE" "item: #1" "pr: https://github.com/acme/app/pull/9" "summary: s" "checked: $1" "" >"$FIX/screens/t1"; }
+
+# Reconcile -----------------------------------------------------------------------------------
+one in-review "" idle; snap none:none:idle; prs 'b-#1' MERGED 9; cyc
+expect "reconcile: workspace gone, PR merged -> done" "$(pf .state)" done
+expect "reconcile: workspace gone is an event" "$(evs)" "#1:pr-merged"
+one in-progress "" idle; snap none:none:idle; prs 'b-#1' OPEN 9; cyc
+expect "reconcile: workspace gone, open PR -> accepting, not in-review" "$(pf .state)" accepting
+expect "reconcile: workspace gone, open PR needs acceptance" "$(needs)" "accept:#1"
+one in-review "" idle; snap none:none:idle; echo '[]' >"$FIX/prs.json"; cyc
+expect "reconcile: workspace gone, no PR -> blocked" "$(pf '.state + "/" + .reason')" "blocked/workspace missing"
+expect "reconcile: workspace gone, no PR needs the user" "$(needs)" "blocked:#1"
+expect_exit "reconcile: a need exits 10" "$rc" 10
+
+one in-progress "In Progress" working; ws w1x 'b-new' none >/dev/null; jq 'map(if .id == "w1" then .branch = "b-new" else . end)' "$FIX/workspaces.json" >"$FIX/w.tmp" && mv "$FIX/w.tmp" "$FIX/workspaces.json"; cyc
+expect "reconcile: renamed branch is stored" "$(pf .branch)" "b-new"
+expect "reconcile: renamed branch is an event" "$(evs)" "#1:reconciled"
+one in-progress "In Progress" working; snap w1:t9:working; cyc
+expect "reconcile: replaced terminal is stored" "$(pf .terminal)" t9
+one in-progress "" working '{"workspace": null, "branch": "b-#1"}'; ws w9 'b-#1' "In Progress"; snap w9:t9:working; cyc
+expect "reconcile: workspace-less in-progress item gets its workspace" "$(pf .workspace)" w9
+one in-progress "" working '{"workspace": null, "branch": "b-#1"}'; snap none:none:idle; cyc
+expect "reconcile: no workspace found -> queued" "$(pf .state)" queued
+one queued "" idle '{"workspace": null, "branch": "b-#1"}'; ws w5 'b-#1' "In Progress"; snap w5:t5:working; cyc
+expect "reconcile: a tagged workspace matching a workspace-less item is adopted" "$(pf .workspace)" w5
+one in-progress "In Progress" working; ws w7 other-branch "In Progress"; cyc
+expect "reconcile: a tagged workspace outside the plan is ignored" "$(evs)" ""
+expect_exit "reconcile: nothing to do exits 0" "$rc" 0
+one in-progress "Blocked" working; cyc
+expect "reconcile: user moved it to Blocked" "$(pf '.state + "/" + .reason')" "blocked/moved by user"
+one in-review "Done" idle; cyc
+expect "reconcile: user moved it to Done" "$(pf .state)" done
+one in-review "In Progress" idle; cyc
+expect "reconcile: other tag mismatch re-applies the group" "$(cat "$FIX/tags.log")" "w1 In Review"
+expect "reconcile: re-tag is an event" "$(evs)" "#1:tag-moved"
+one in-review "In Review" idle '{}' '{"maxParallel": 0, "groups": {"In Review": "rev"}}'; ws w2 b2 other >/dev/null; cyc
+expect "reconcile: no tag call when the group already matches" "$(cat "$FIX/tags.log" 2>/dev/null)" ""
+
+# Watch and move -----------------------------------------------------------------------------
+one in-progress "In Progress" working; prs 'b-#1' OPEN 9; cyc
+expect "move: PR URL recorded as a string" "$(pf .pr)" "https://github.com/acme/app/pull/9"
+expect "move: PR opened is an event" "$(evs)" "#1:pr-opened"
+expect "move: a working item stays in-progress" "$(pf .state)" in-progress
+one in-progress "In Progress" idle; prs 'b-#1' OPEN 9; done_screen "CI 4/4 green; criteria 4/5; unmet: docs"; cyc
+expect "move: a DONE block goes to accepting, never in-review" "$(pf '.state + "/" + .acceptance')" "accepting/pending"
+expect "move: checked saved from the DONE block" "$(pf .checked)" "CI 4/4 green; criteria 4/5; unmet: docs"
+expect "move: criteria saved from the DONE block" "$(pf '.criteria | tojson')" '{"met":4,"total":5,"unmet":["docs"]}'
+expect "move: the DONE block is an accept need" "$(needs)" "accept:#1"
+expect "move: accepting is an event" "$(evs)" "#1:pr-opened #1:accepting"
+one in-progress "In Progress" idle; prs 'b-#1' OPEN 9; done_screen "5/5 green"; cyc; cyc
+expect "move: accepting stays until accept.sh, needs reported each cycle" "$(pf .state):$(needs)" "accepting:accept:#1"
+expect_not "move: accepting is reported once as an event" "$(jq -r '[.events[] | .action] | join(" ")' "$plan")" "accepting accepting"
+one in-review "In Review" working; cyc
+expect "move: in-review + working -> feedback" "$(pf .state)" feedback
+one feedback "In Progress" working '{"reason": "follow-up sent"}'; cyc
+expect "move: working clears the follow-up reason" "$(pf '.reason // "none"')" none
+one feedback "In Progress" working '{"reason": "acceptance follow-up"}'; cyc
+expect "move: working clears the acceptance follow-up reason" "$(pf '.reason // "none"')" none
+one feedback "In Progress" idle; cyc
+expect "move: feedback + idle, no reason -> in-review" "$(pf .state)" in-review
+one feedback "In Progress" idle '{"reason": "follow-up sent"}'; cyc
+expect "move: feedback + idle, reason set -> wait" "$(pf .state)" feedback
+one feedback "In Progress" idle '{"acceptance": "docs missing"}'; cyc
+expect "move: after an acceptance follow-up, re-compare" "$(pf .state):$(needs)" "accepting:accept:#1"
+
+one in-progress "In Progress" working; printf 'busy\n' >"$FIX/screens/t1"; "$scripts/status.sh" proj "$plan" >/dev/null
+screens="$HOME/.agents/orchestrator/screens/20261112-1200.json"
+jq --argjson old $(($(date +%s) - 20 * 60)) '.t1.since = $old' "$screens" >"$screens.tmp" && mv "$screens.tmp" "$screens"; cyc
+expect "move: stalled is an event and a need, state unchanged" "$(evs) $(needs) $(pf .state)" "#1:stalled stalled:#1 in-progress"
+cyc
+expect "move: stalled is reported as an event once" "$(jq -r '[.events[] | select(.action == "stalled")] | length' "$plan")" 1
+one in-progress "In Progress" working; printf '%s\n' "■ You've hit your usage limit. Try again in 3 hours." >"$FIX/screens/t1"; cyc
+expect "move: fatal banner -> blocked with the banner" "$(pf '.state + "/" + .reason')" "blocked/■ You've hit your usage limit. Try again in 3 hours."
+expect "move: fatal banner is a blocked need" "$(needs)" "blocked:#1"
+one in-progress "In Progress" blocked; cyc
+expect "move: Paradev blocked (needs input) is a question, state unchanged" "$(needs) $(pf .state)" "question:#1 in-progress"
+one in-progress "In Progress" idle; cyc
+expect "move: idle, no PR, no wait -> one follow-up" "$(cat "$FIX/send.log")" "t1 Please finish: commit, push and open the PR (gh pr create --base main), then print your ORCHESTRATOR_WORKER_DONE block."
+expect "move: the follow-up is recorded" "$(pf .reason) $(evs)" "follow-up sent #1:follow-up-sent"
+cyc
+expect "move: a second idle cycle blocks instead of a second follow-up" "$(pf '.state + "/" + .reason') $(wc -l <"$FIX/send.log" | tr -d ' ')" "blocked/no PR after the follow-up 1"
+one in-progress "In Progress" idle; printf '%s\n' "ORCHESTRATOR_WORKER_BLOCKED" "item: #1" "reason: needs the staging key" "needs: a key" "" >"$FIX/screens/t1"; cyc
+expect "move: a BLOCKED block -> blocked with its reason" "$(pf '.state + "/" + .reason')" "blocked/needs the staging key"
+expect "move: no follow-up for a BLOCKED block" "$(cat "$FIX/send.log" 2>/dev/null)" ""
+one in-progress "In Progress" idle; printf '%s\n' "ORCHESTRATOR_WORKER_WAITING" "item: #1" "waiting-on: code review" "resumes-when: it ends" "" >"$FIX/screens/t1"; cyc
+expect "move: a declared wait is skipped (no follow-up, no transition)" "$(cat "$FIX/send.log" 2>/dev/null)$(pf .state)$(needs)" "in-progress"
+WAIT_MINUTES=0 cyc
+expect "move: a stale wait is reported for a screen check" "$(needs)" "stale-wait:#1"
+expect "move: a stale wait is not read here (no follow-up)" "$(cat "$FIX/send.log" 2>/dev/null)" ""
+one in-review "In Review" idle; prs 'b-#1' MERGED 9; cyc
+expect "move: PR MERGED -> done" "$(pf .state)" done
+expect "move: merged is an event, and the item moves to Done" "$(evs) | $(cat "$FIX/tags.log")" "#1:pr-merged #1:tag-moved :finished | w1 Done"
+one in-review "In Review" idle; prs 'b-#1' CLOSED 9; cyc
+expect "move: PR CLOSED unmerged -> blocked" "$(pf '.state + "/" + .reason')" "blocked/PR closed unmerged"
+expect "move: closed PR is a closed-pr need" "$(needs)" "closed-pr:#1"
+
+# a stacked PR conflicting with its done parent: the rebase follow-up, once
+stack_sandbox() {
+  dispatch_sandbox
+  plan_with "[$(item '#1' done '' '' | jq -c '. + {pr: "https://github.com/acme/app/pull/5"}'),
+    $(item '#2' in-review w2 t2 | jq -c '. + {dependsOn: ["#1"], pr: "https://github.com/acme/app/pull/12"}')]" '{"maxParallel": 0}'
+  ws w2 'b-#2' "In Review"; snap w2:t2:idle
+  prs 'b-#2' OPEN 12 '{"baseRefName": "b-#1", "mergeable": "CONFLICTING"}'
+}
+stack_sandbox; cyc
+expect "move: conflicting stacked PR gets the rebase follow-up" "$(cat "$FIX/send.log")" "t2 #1 has merged. Run: git fetch origin && git rebase --onto origin/main <#1's tip you noted> HEAD, then git push --force-with-lease, and drop the \"merge #1 first\" line from the PR description."
+expect "move: rebase follow-up -> feedback, follow-up sent" "$(pf '.state + "/" + .reason' '#2') $(evs)" "feedback/follow-up sent #2:follow-up-sent"
+jq '(.items[] | select(.id == "#2")) |= (.state = "in-review" | .reason = null)' "$plan" >"$FIX/p.tmp" && mv "$FIX/p.tmp" "$plan"; cyc
+expect "move: the rebase follow-up is sent once; still conflicting is told" "$(wc -l <"$FIX/send.log" | tr -d ' ') $(needs)" "1 blocked:#2"
+
+# Dependency failure and recovery
+dispatch_sandbox
+plan_with "[$(item '#1' blocked '' '' 'needs a key'), $(item '#2' queued '' '' | jq -c '. + {dependsOn: ["#1"]}')]" '{"maxParallel": 0}'
+snap none:none:idle; cyc
+expect "move: dependency failure -> dependents waiting" "$(pf '.state + "/" + .reason' '#2')" "waiting/waiting on #1: needs a key"
+expect "move: dependency failure is a need" "$(needs)" "dependency-failed:#2"
+jq '(.items[] | select(.id == "#1")) |= (.state = "in-progress" | .reason = null)' "$plan" >"$FIX/p.tmp" && mv "$FIX/p.tmp" "$plan"; cyc
+expect "move: recovery -> waiting dependents queued again" "$(pf '.state + "/" + (.reason // "none")' '#2')" "queued/none"
+
+# Follow-up owed after another item merges
+dispatch_sandbox
+plan_with "[$(item '#1' done '' ''), $(item '#2' in-review w2 t2 | jq -c '. + {followUp: {after: "#1", message: "redo the config"}}')]" '{"maxParallel": 0}'
+ws w2 'b-#2' "In Review"; snap w2:t2:idle; cyc
+expect "move: a follow-up owed after a merge is sent" "$(cat "$FIX/send.log") $(pf '.state + "/" + .reason' '#2') $(pf '.followUp | tojson' '#2')" "t2 redo the config feedback/follow-up sent null"
+
+# Merge gate ----------------------------------------------------------------------------------
+merge_sandbox() { # merge_sandbox <checked> [plan-json]
+  local p=${2:-}
+  [[ -n $p ]] || p='{"maxParallel": 0, "integrations": [{"id": "F1", "title": "F", "branch": "feature/csv", "base": "main", "state": "open"}]}'
+  dispatch_sandbox
+  plan_with "[$(item '#30' in-review w30 t30 | jq -c --arg c "$1" '. + {integration: "F1", pr: "https://github.com/acme/app/pull/9", checked: $c, acceptance: "ok"}')]" \
+    "$p"
+  ws w30 'b-#30' "In Review"; snap w30:t30:idle; prs 'b-#30' OPEN 9
+  pr_view OPEN feature/csv MERGEABLE '[{"name":"ci","conclusion":"SUCCESS"}]'
+}
+merge_sandbox "5/5 green"; cyc
+expect "merge gate: a green sub-PR into an integration branch is merged" "$(cat "$FIX/merge.args")" "pr merge 9 --merge"
+expect "merge gate: the item is done, with a merged event" "$(pf .state '#30') $(evs)" "done F1:rules #30:merged"
+expect "merge gate: rules are read once per integration and stored" "$(jq -r '.integrations[0].mergeNote' "$plan")" ok
+merge_sandbox "5/5 green"; pr_view OPEN feature/csv MERGEABLE '[{"name":"ci","conclusion":"FAILURE"}]'; cyc
+expect "merge gate: red checks wait, no merge" "$(cat "$FIX/merge.args" 2>/dev/null)$(pf .state '#30')" "in-review"
+merge_sandbox "5/5 green"; pr_view OPEN feature/csv MERGEABLE '[]'; cyc
+expect "merge gate: no PR checks and no local run: one follow-up" "$(pf '.state + "/" + .reason' '#30') $(cat "$FIX/send.log" | cut -c1-30)" "feedback/acceptance follow-up t30 Run the project's tests lo"
+expect "merge gate: the gap is an acceptance-gap event" "$(evs)" "#30:acceptance-gap #30:follow-up-sent"
+merge_sandbox "5/5 green"; echo '[{"type":"required_linear_history"}]' >"$FIX/rules.json"; cyc
+expect "merge gate: rules forbidding merge commits leave the merge to humans" "$(jq -r '.integrations[0].mergeNote' "$plan") $(cat "$FIX/merge.args" 2>/dev/null)" "human "
+merge_sandbox "5/5 green" '{"maxParallel": 0}'; pr_view OPEN main MERGEABLE '[{"name":"ci","conclusion":"SUCCESS"}]'
+jq '(.items[0]).integration = null' "$plan" >"$FIX/p.tmp" && mv "$FIX/p.tmp" "$plan"; cyc
+expect "merge gate: a PR into the default branch is never merged" "$(cat "$FIX/merge.args" 2>/dev/null)" ""
+
+# Integrations --------------------------------------------------------------------------------
+integ='{"maxParallel": 0, "integrations": [{"id": "F1", "title": "CSV", "branch": "feature/csv", "base": "main", "state": "open"}]}'
+dispatch_sandbox
+plan_with "[$(item '#1' done '' '' | jq -c '. + {integration: "F1", pr: "https://github.com/acme/app/pull/5"}')]" "$integ"; snap none:none:idle; cyc
+expect "integrate: ready -> the <F>-integrate item is added" "$(pf .state F1-integrate)" queued
+dispatch_sandbox
+plan_with "[$(item '#1' blocked '' '' 'needs a key' | jq -c '. + {integration: "F1"}')]" "$integ"; snap none:none:idle; cyc
+expect "integrate: held is an event and a need" "$(evs) $(needs)" "F1:held held:F1"
+cyc
+expect "integrate: held is reported once per cause" "$(jq -r '[.events[] | select(.action == "held")] | length' "$plan")" 1
+
+# Dispatch ------------------------------------------------------------------------------------
+state_tag() { if [[ $1 == in-review ]]; then echo "In Review"; elif [[ $1 == done ]]; then echo Done; else echo "In Progress"; fi; }
+disp_sandbox() { # disp_sandbox <parent-state> <parent-agent> <plan-json> [parent-json]
+  local x=${4:-}; [[ -n $x ]] || x='{}'
+  dispatch_sandbox
+  plan_with "[$(item '#1' "$1" w1 t1 | jq -c ". + {pr: \"https://github.com/acme/app/pull/5\"} + $x"),
+    $(item '#2' queued '' '' | jq -c '. + {dependsOn: ["#1"]}')]" "$3"
+  ws w1 'b-#1' "$(state_tag "$1")"
+  snap w1:t1:"$2"; prs 'b-#1' OPEN 5
+}
+disp_sandbox in-review idle '{"mergeMethods": ["squash", "merge"]}'; cyc
+expect "dispatch: a dependency with a PR is stacked on its branch" "$(pf .state '#2') $(grep -A1 -e '--base-branch' "$FIX/create.args" | tr '\n' ' ')" "in-progress --base-branch b-#1 "
+expect "dispatch: the dispatch is an event" "$(evs)" "#2:dispatched"
+disp_sandbox in-review idle '{"mergeMethods": ["squash"]}'; cyc
+expect "dispatch: squash-only repos wait for the merge, no stacking" "$(pf .state '#2')" queued
+disp_sandbox done idle '{"mergeMethods": ["squash"]}'; jq '.items[0].state = "done"' "$plan" >"$FIX/p.tmp" && mv "$FIX/p.tmp" "$plan"; cyc
+expect "dispatch: squash-only, parent merged -> starts on its target" "$(pf .state '#2') $(grep -A1 -e '--base-branch' "$FIX/create.args" | tr '\n' ' ')" "in-progress --base-branch main "
+disp_sandbox in-progress working '{}' '{"pr": null}'; prs 'zzz' OPEN 5; cyc
+expect "dispatch: a dependency without a PR is not started" "$(pf .state '#2')" queued
+disp_sandbox feedback working '{}'; cyc
+expect "dispatch: never stack on a feedback item" "$(pf .state '#2')" queued
+disp_sandbox in-progress working '{"maxParallel": 1}'; jq '.items[1].dependsOn = []' "$plan" >"$FIX/p.tmp" && mv "$FIX/p.tmp" "$plan"; cyc
+expect "dispatch: the parallel limit holds a queued item back" "$(pf .state '#2')" queued
+disp_sandbox feedback working '{"maxParallel": 1}'; jq '.items[1].dependsOn = []' "$plan" >"$FIX/p.tmp" && mv "$FIX/p.tmp" "$plan"; cyc
+expect "dispatch: feedback is outside the limit" "$(pf .state '#2')" in-progress
+disp_sandbox accepting idle '{"maxParallel": 1}'; jq '.items[1].dependsOn = []' "$plan" >"$FIX/p.tmp" && mv "$FIX/p.tmp" "$plan"; cyc
+expect "dispatch: accepting is outside the limit" "$(pf .state '#2')" in-progress
+expect "dispatch: a fresh dispatch is not re-tagged" "$(cat "$FIX/tags.log" 2>/dev/null)" ""
+
+# Finished ------------------------------------------------------------------------------------
+one done Done idle; cyc
+expect "finished: all done -> finished, status finished, notification" "$(jq -r .finished <<<"$out") $(pf . | jq -r .state) $(jq -r .status "$plan") $(wc -l <"$FIX/notify.log" | tr -d ' ')" "true done finished 1"
+expect_exit "finished: exit 0 with nothing to judge" "$rc" 0
+one in-review "In Review" idle; cyc; cyc
+expect "finished: in-review only -> finished but the run stays active" "$(jq -r .finished <<<"$out") $(jq -r .status "$plan")" "true active"
+expect "finished: notified once" "$(wc -l <"$FIX/notify.log" | tr -d ' ')" 1
+expect "finished: notification text" "$(cat "$FIX/notify.log")" "notifications show Orchestrator finished --body 1 in review, 0 blocked --sound"
+one in-progress "In Progress" working; cyc
+expect "finished: a running item is not finished" "$(jq -r .finished <<<"$out")" false
+
+# Exit codes and dry-run ----------------------------------------------------------------------
+one in-progress "In Progress" working; jq '.owner = "someone-else"' "$plan" >"$FIX/p.tmp" && mv "$FIX/p.tmp" "$plan"
+before=$(cksum <"$plan"); cyc
+expect "exit 3: taken over prints taken-over" "$out" taken-over
+expect_exit "exit 3: taken over" "$rc" 3
+cyc --dry-run; expect_exit "exit 3: taken over also in --dry-run" "$rc" 3
+expect "exit 3: nothing written" "$(cksum <"$plan")" "$before"
+one in-progress "In Progress" working; touch "$FIX/host-down"; before=$(jq -S 'del(.heartbeat)' "$plan" | cksum); cyc
+expect_exit "exit 1: a status failure stops the cycle" "$rc" 1
+expect "exit 1: nothing half-applied (only the heartbeat)" "$(jq -S 'del(.heartbeat)' "$plan" | cksum)" "$before"
+one in-review "In Progress" idle; prs 'b-#1' MERGED 9; before=$(cksum <"$plan"); cyc --dry-run
+expect "dry-run: reports what it would do" "$(evs) $(jq -r .dryRun <<<"$out")" "#1:pr-merged #1:tag-moved :finished true"
+expect "dry-run: the plan file is byte-identical" "$(cksum <"$plan")" "$before"
+expect "dry-run: no tag call, no table, no message" "$(cat "$FIX/tags.log" 2>/dev/null)$(jq -r .table <<<"$out")" "null"
+merge_sandbox "5/5 green"; before=$(cksum <"$plan"); cyc --dry-run
+expect "dry-run: merge gate would merge but does not" "$(cat "$FIX/merge.args" 2>/dev/null)$(evs)" "#30:merged"
+expect "dry-run: merge leaves the plan alone" "$(cksum <"$plan")" "$before"
+disp_sandbox in-review idle '{"mergeMethods": ["merge"]}'; before=$(cksum <"$plan"); cyc --dry-run
+expect "dry-run: would dispatch, creates nothing" "$(evs) $(cat "$FIX/create.args" 2>/dev/null)" "#2:dispatched"
+expect "dry-run: dispatch leaves the plan alone" "$(cksum <"$plan")" "$before"
 # --- summary.sh: the run-summary page ---------------------------------------------------------
 sandbox
 plan_with "[$(item '#1' done '' '' | jq -c '. + {title: "A", integration: "F1", pr: "https://github.com/acme/app/pull/9", checked: "ran <script>alert(1)</script>", criteria: {met: 1, total: 2, unmet: ["handles <b>x</b>"]}, acceptance: "gap & more", extras: "follow-up", branch: "b-1"}'),
@@ -894,6 +1140,13 @@ expect "summary: --open opens the browser pane" "$(cat "$FIX/panes.args")" "http
 touch "$FIX/no-panes-open"; rm -f "$FIX/panes.args"
 "$scripts/summary.sh" "$plan" --open >/dev/null
 expect_exit "summary: --open without panes open still succeeds" "$?" 0
+
+# Atomicity: a plan write that fails before anything is recorded sends and tags nothing.
+one in-progress "In Review" idle '{}' '{"maxParallel": 0}'
+jq '.items += [{id: "#9", state: "queued", pr: "not-a-url"}]' "$plan" >"$FIX/p.tmp" && mv "$FIX/p.tmp" "$plan"
+before=$(jq -S 'del(.heartbeat)' "$plan" | cksum); cyc
+expect_exit "atomic: a failed plan write exits 1" "$rc" 1
+expect "atomic: no follow-up sent, no tag moved, plan unchanged" "$(cat "$FIX/send.log" "$FIX/tags.log" 2>/dev/null)$(jq -S 'del(.heartbeat)' "$plan" | cksum)" "$before"
 
 # zsh too, when installed
 if command -v zsh >/dev/null; then

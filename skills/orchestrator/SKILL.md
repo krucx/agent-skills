@@ -219,6 +219,10 @@ prompt in `dispatch.sh`.
 
 ## Reconcile
 
+`<skill-dir>/scripts/cycle.sh <project-id> <plan-file>` does this whole table (and Watch and move, below) in one
+call: `status.sh` once, every repair, no model turn. Exit 10 means a `needs` entry is yours; the rewrite
+of this section around it is a later change.
+
 At each watch cycle's start, Continue and Report back: `<skill-dir>/scripts/status.sh [--compact]
 <project-id> <plan-file>` (`--compact` in watch cycles; fields in its header). Repair the plan
 before any transition:
@@ -234,6 +238,12 @@ before any transition:
 | Other tag/state mismatch | Re-apply the state's group. |
 
 ## Watch and move
+
+`<skill-dir>/scripts/cycle.sh [--dry-run] <project-id> <plan-file>` applies every row of the table below that
+is a pure function of the plan and status rows, plus the merge gate, integrations, dispatch, tags and finished
+detection, and prints `{"events", "needs", "finished"}`; only `needs` (accept, question, blocked,
+dependency-failed, stalled, stale-wait, held, closed-pr) are for you. A DONE block moves an item to `accepting`,
+never straight to `in-review`. The prose below remains the reference for what it does.
 
 `<skill-dir>/scripts/wait-change.sh <project-id> <plan-file>` exits with a one-line summary when a
 watched workspace's agent state, tag or PR changes or it vanishes, else after 20 minutes.
