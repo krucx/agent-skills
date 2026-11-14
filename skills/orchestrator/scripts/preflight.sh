@@ -110,9 +110,15 @@ if [[ -n $slug ]]; then
         if $takeover; then
           plan=$(jq -nc --arg p "$plan_file" --arg t "$first" '{path: $p, claim: "taken-over", takenOver: true, detail: $t}')
         else
-          carry=null; [[ -n $rest ]] && jq -e . >/dev/null 2>&1 <<<"$rest" && carry=$(jq -c '.carryOver' <<<"$rest")
-          plan=$(jq -nc --arg p "$plan_file" --arg c "$first" --argjson co "$carry" \
-            '{path: $p, claim: $c} + (if $co != null then {carryOver: $co} else {} end)')
+          carry=null integrations=null
+          if [[ -n $rest ]] && jq -e . >/dev/null 2>&1 <<<"$rest"; then
+            carry=$(jq -c '.carryOver' <<<"$rest")
+            integrations=$(jq -c '.integrationCarryOver // []' <<<"$rest")
+          fi
+          plan=$(jq -nc --arg p "$plan_file" --arg c "$first" --argjson co "$carry" --argjson ic "$integrations" \
+            '{path: $p, claim: $c}
+             + (if $co != null then {carryOver: $co} else {} end)
+             + (if ($ic | length) > 0 then {integrationCarryOver: $ic} else {} end)')
         fi ;;
       3) plan=$(jq -nc --arg p "$plan_file" --argjson o "$(jq -c . <<<"$out" 2>/dev/null || echo null)" '{path: $p, claim: "live-owner", owner: $o}')
          raise 3 ;;
