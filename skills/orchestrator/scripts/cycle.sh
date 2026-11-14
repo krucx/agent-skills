@@ -188,7 +188,7 @@ reconcile() {
     id=$(jq -r --arg b "$(jq -r .branch <<<"$row")" \
       '[.items[] | select(.workspace == null and .branch == $b and .state != "done" and .state != "skipped") | .id][0] // empty' <<<"$P")
     [[ -n $id ]] || continue
-    upd "$id" '.workspace = $w' --arg w "$ws"
+    upd "$id" '.workspace = $w | (if .state == "queued" then .state = "in-progress" else . end)' --arg w "$ws"
     ev "$id" reconciled "adopted tagged workspace $ws"
   done < <(jq -c '.[] | select(.inPlan | not) | select(.item == null)' <<<"$ROWS")
 }
@@ -216,7 +216,7 @@ to_accepting() { # to_accepting <id> <why>: the DONE block (or an idle worker wi
 }
 
 transition() {
-  local id=$1 state row ast areason marker stale prstate prurl prnum it_pr reason conflicting prbase
+  local id=$1 state row ast areason marker stale prstate prurl prnum it_pr reason
   state=$(field "$id" .state)
   started "$state" || return 0
   row=$(jq -c --arg id "$id" '[.[] | select(.item == $id)][0] // empty' <<<"$ROWS")
@@ -362,8 +362,7 @@ while IFS= read -r f; do
     *no-merge-commit*|*unknown*) note=human ;;
     *strict*) note=strict ;;
   esac
-  upd_int() { P=$(jq -c --arg f "$f" --arg n "$note" '(.integrations[] | select(.id == $f)) |= (.mergeNote = $n)' <<<"$P"); }
-  upd_int
+  P=$(jq -c --arg f "$f" --arg n "$note" '(.integrations[] | select(.id == $f)) |= (.mergeNote = $n)' <<<"$P")
   ev "$f" rules "$branch: $note ($(printf '%s' "$rules" | head -n 1 | cut -c1-120))"
 done < <(jq -r '[.items[] | select(.state == "in-review" and .integration != null) | .integration] | unique[]' <<<"$P")
 flush
@@ -396,8 +395,10 @@ while IFS= read -r line; do
   verdict=${line%% *}; rest=${line#* }; f=${rest%%:*}
   case $verdict in
     ready)
-      if [[ -n $dry ]]; then ev "$f" in-review "would add $f-integrate (dry run)"
-      else "$here/integrate.sh" add "$plan" "$f" >"$scratch/out" 2>&1 </dev/null && { reload; ev "$f" dispatched "queued $f-integrate"; } ||
+      if [[ -n $dry ]]; then ev "$f" dispatched "would add $f-integrate (dry run)"
+      elif flush; "$here/integrate.sh" add "$plan" "$f" >"$scratch/out" 2>&1 </dev/null; then
+        reload; ev "$f" dispatched "queued $f-integrate"
+      else
         echo "cycle: integrate add $f: $(head -n 1 "$scratch/out")" >&2
       fi ;;
     held) if once "$f" held "$line"; then need held "$f" "$line"; fi ;;
