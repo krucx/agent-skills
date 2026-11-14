@@ -37,7 +37,7 @@ me=${SUPERSET_TERMINAL_ID:-unknown}
 cli=$(command -v superset || command -v paradev || command -v pdev || true)
 now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 # The fixed list of event actions; keep in step with references/plan-schema.md.
-actions='["dispatched","pr-opened","in-review","merged","pr-merged","tag-moved","follow-up-sent","acceptance-gap","blocked","waiting","skipped","taken-over","finished","closed"]'
+actions='["dispatched","pr-opened","in-review","merged","pr-merged","tag-moved","follow-up-sent","acceptance-gap","blocked","waiting","skipped","taken-over","finished","closed","reconciled","stalled","accepting","held","queued","feedback","rules"]'
 
 lock() {
   mkdir -p "$dir"

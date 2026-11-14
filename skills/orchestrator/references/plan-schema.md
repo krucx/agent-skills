@@ -13,14 +13,15 @@
  "events": [{"at": "2026-11-12T20:15:03Z", "item": "#340", "action": "dispatched", "detail": "workspace w340, claude auto"}]}
 ```
 
-- `status`: `active`|`finished`. `state`, `reason`: see SKILL.md. `plan.sh` adds `owner`,
+- `status`: `active`|`finished`. `state`, `reason`: see SKILL.md; `cycle.sh` adds the transient state `accepting`
+  (a DONE block arrived, `acceptance` `"pending"`; it becomes `in-review` only through `accept.sh`, and does not count against the parallel limit). `plan.sh` adds `owner`,
   `heartbeat`, `takenOverFrom`, `forcedAt`, `carryOver`; `dispatch.sh` adds `dispatchFailures`
   after a failed workspace creation.
 - `integrations` (optional; older plans lack it): feature branches that collect a run's PRs.
   `branch`: `feature/<slug>`; `base`: always the repo's default branch (integrations never nest);
   `pr`: the PR that lands it on `base`, once opened; `state`: `open`|`merged`; `mergeNote`
   (optional): `"human"` when its rulesets forbid merge commits (the orchestrator then leaves the
-  sub-PR merges to humans), `"strict"` once the up-to-date requirement was reported. Item `integration`:
+  sub-PR merges to humans), `"strict"` once the up-to-date requirement was reported, `"ok"` when `cycle.sh` read its rules and found none in the way. Item `integration`:
   an integration's `id`, `dropped` (optional, with state `skipped`): the user dropped it so its
   integration can finish; `epic` (optional): `{id, title, url}` of the parent issue an epic run imported; the final PR links it; `integrates`: on the synthetic `<F>-integrate` item `integrate.sh add`
   creates (no `integration`; targets the default branch, starts on integration `<F>`'s branch), or `null`/absent for an item targeting the default branch. An item's
@@ -46,7 +47,8 @@
   `{"at": "<ISO-8601 UTC>", "item": "<ID or F1 or null>", "action": "<kind>", "detail": "<one line>"}`.
   `action` is one of `dispatched`, `pr-opened`, `in-review`, `merged` (into an integration branch,
   by us), `pr-merged` (by a human), `tag-moved`, `follow-up-sent`, `acceptance-gap`, `blocked`,
-  `waiting`, `skipped`, `taken-over`, `finished`, `closed`. Append with `plan.sh event <item>
+  `waiting`, `skipped`, `taken-over`, `finished`, `closed`, and the ones `cycle.sh` adds: `reconciled`,
+  `stalled`, `accepting`, `held`, `queued`, `feedback`, `rules`. Append with `plan.sh event <item>
   <action> "<detail>"` (owner-checked, under the lock); read with `plan.sh events [--since <ISO>]`.
   `plan.sh close` appends `closed` and `claim --takeover` appends `taken-over` (previous owner in
   `detail`). `plan.sh write` rejects an entry missing a field or with another action, naming its index.
