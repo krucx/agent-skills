@@ -1419,6 +1419,35 @@ expect "noise: --all-changes keeps none->working after dispatch" "$(nw --all-cha
 
 # watch.sh
 wt() { out=$(POLL_SECONDS=1 "$scripts/watch.sh" "$@" proj "$plan" "${WT:-15}" 2>"$FIX/watch.err"); rc=$?; }
+# A finish observed by a cycle must end this watch iteration without entering another wait.
+watch_fixture="$FIX/issue-74-orchestrator-verify-watch-sh"
+mkdir -p "$watch_fixture"
+cp "$scripts/watch.sh" "$watch_fixture/watch.sh"
+cat >"$watch_fixture/cycle.sh" <<'EOF'
+#!/usr/bin/env bash
+count=0
+[[ ! -f $FIX/issue-74-orchestrator-verify-watch-sh/cycles ]] || count=$(cat "$FIX/issue-74-orchestrator-verify-watch-sh/cycles")
+count=$((count + 1))
+echo "$count" >"$FIX/issue-74-orchestrator-verify-watch-sh/cycles"
+if ((count == 1)); then
+  echo '{"events":[],"needs":[],"finished":false,"table":null}'
+else
+  echo '{"events":[{"at":"2026-11-15T12:34:00Z","item":null,"action":"finished","detail":"0 in review, 0 blocked"}],"needs":[],"finished":true,"table":null}'
+fi
+EOF
+cat >"$watch_fixture/wait-change.sh" <<'EOF'
+#!/usr/bin/env bash
+count=0
+[[ ! -f $FIX/issue-74-orchestrator-verify-watch-sh/waits ]] || count=$(cat "$FIX/issue-74-orchestrator-verify-watch-sh/waits")
+echo $((count + 1)) >"$FIX/issue-74-orchestrator-verify-watch-sh/waits"
+echo changed
+EOF
+chmod +x "$watch_fixture/watch.sh" "$watch_fixture/cycle.sh" "$watch_fixture/wait-change.sh"
+FIX="$FIX" out=$(FIX="$FIX" "$watch_fixture/watch.sh" proj "$plan" 10 2>"$FIX/issue-74-watch.err"); rc=$?
+expect_exit "watch: finish during an iteration exits with documented status" "$rc" 0
+expect "watch: finished cycle is not followed by another wait" "$(cat "$watch_fixture/waits")" 1
+expect "watch: one finished event is emitted" "$(grep -c 'finished 0 in review, 0 blocked' <<<"$out")" 1
+expect "watch: finished is the final output line" "$(tail -n 1 <<<"$out")" finished
 noise_sandbox; prs 'b-#1' OPEN 9
 (sleep 1; prs 'b-#1' MERGED 9) &
 (sleep 5; printf '%s\n' "ORCHESTRATOR_WORKER_DONE" "item: #2" "pr: https://github.com/acme/app/pull/10" "summary: s" "checked: 1/1 green" "" >"$FIX/screens/t2"; snap w2:t2:idle) &
