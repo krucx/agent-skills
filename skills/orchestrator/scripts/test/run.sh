@@ -198,6 +198,24 @@ if command -v sqlite3 >/dev/null; then
   expect_exit "groups: a folder with no workspaces passes" $? 0
 fi
 
+# --- write: pr must be a URL string (or null), never a bare number ---------------------------------
+sandbox
+plan_with "[$(item '#5' in-progress w5 t5)]"
+for bad_pr in 388 '"388"' '"#388"'; do
+  jq --argjson pr "$bad_pr" '.items[0].pr = $pr' "$plan" >"$root/next.json"
+  out=$("$scripts/plan.sh" write "$root/next.json" 2>&1); code=$?
+  expect_exit "write: item pr $bad_pr is rejected" $code 1
+  expect "write: names the item and wants a URL" "$out" "#5: pr must be a PR URL"
+done
+jq '.integrations = [{id: "F1", pr: 12}]' "$plan" >"$root/next.json"
+out=$("$scripts/plan.sh" write "$root/next.json" 2>&1); code=$?
+expect_exit "write: integration pr number is rejected" $code 1
+expect "write: names the integration" "$out" "F1: pr must be a PR URL"
+jq '.items[0].pr = "https://github.com/acme/app/pull/388" | .integrations = [{id: "F1", pr: null}]' "$plan" >"$root/next.json"
+"$scripts/plan.sh" write "$root/next.json" >/dev/null 2>&1
+expect_exit "write: URL and null pass" $? 0
+expect "write: URL is stored" "$(jq -r '.items[0].pr' "$plan")" "https://github.com/acme/app/pull/388"
+
 # --- ownership: live vs stale, and forced takeover (macOS and GNU date parsing) ----------------
 sandbox
 plan_with "[$(item '#6' in-progress w6 t6)]" "{\"owner\": \"orch-1\", \"heartbeat\": \"$(ago 2)\"}"
