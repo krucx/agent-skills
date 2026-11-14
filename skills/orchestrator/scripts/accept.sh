@@ -19,7 +19,7 @@ set -uo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
 die() { echo "accept: $*" >&2; exit 1; }
-usage() { sed -n '6,18p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 1; }
+usage() { sed -n '6,17p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 1; }
 now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 cmd=${1:-}; shift || usage
@@ -62,8 +62,8 @@ packet() {
         + (if (.criteria.unmet | length) > 0 then ", unmet: " + (.criteria.unmet | join("; ")) else "" end) else "no criteria count" end)
         + (if .checked then "\nchecked: " + .checked else "" end)' <<<"$it" | cut_to 300)$'\n'
     if [[ -n $pr ]]; then
-      files=$(gh pr view "$pr" --json files 2>/dev/null </dev/null | jq -c '.files // []' 2>/dev/null) || files='[]'
-      [[ -n $files ]] || files='[]'
+      files=$(gh pr view "$pr" --json files 2>/dev/null </dev/null | jq -c '.files // empty' 2>/dev/null)
+      if [[ -z $files ]]; then printf '%s\n' "$(printf '%s\n' "$out" "files: unavailable (gh pr view failed)" | cut_to "$budget")"; continue; fi
       read -r num adds dels < <(jq -r '[length, (map(.additions) | add // 0), (map(.deletions) | add // 0)] | @tsv' <<<"$files")
       lines=$((adds + dels))
       out+="files: $num, +$adds -$dels"$'\n'
@@ -78,20 +78,21 @@ packet() {
         room=$((budget - ${#out} - 20))
         if ((room > 0)) && [[ -n $diff ]]; then
           out+="diff:"$'\n'"$(printf '%s' "$diff" | cut_to "$room" $'\n[diff cut]')"$'\n'
-        fi
+        else out+="diff: unavailable or no room ($lines lines changed)"$'\n'; fi
       else
         out+="diff: omitted ($lines lines changed; names only)"$'\n'
       fi
     fi
-    printf '%s\n' "$out"
+    printf '%s\n' "$(printf '%s' "$out" | cut_to "$budget")"
   done
 }
 
 verdict() {
-  local id=${1:-} v=${2:-} text=${3:-} it state pr msg
+  local id=${1:-} v=${2:-} text=${3:-} it state pr msg orig
   [[ -n $id && ( $v == ok || $v == gap ) ]] || usage
   [[ $v == ok || -n $text ]] || die "a gap needs its text"
   it=$(item "$id"); [[ -n $it ]] || die "no item $id in the plan"
+  orig=$P
   state=$(jq -r '.state' <<<"$it")
   [[ $state == accepting ]] || die "$id is $state, not accepting"
   scratch=$(mktemp -d "${TMPDIR:-/tmp}/accept.XXXXXX"); trap 'rm -rf "$scratch"' EXIT
@@ -106,7 +107,7 @@ verdict() {
     "$here/send.sh" --check "$plan" "$id" || exit 1
     pr=$(jq -r '.pr // empty' <<<"$it")
     msg=$text
-    if grep -qiE 'check|CI\b' <<<"$text"; then
+    if grep -qiE '(^|[^[:alnum:]])(checks?|CI)([^[:alnum:]]|$)' <<<"$text"; then
       msg="$text Wait for \`gh pr checks${pr:+ $pr} --watch --fail-fast\`, report the result in \`checked:\`, and print your ORCHESTRATOR_WORKER_DONE block again."
     fi
     P=$(jq -c --arg id "$id" --arg g "$text" --arg m "$msg" --arg at "$(now)" '
@@ -118,7 +119,10 @@ verdict() {
   "$here/plan.sh" write "$scratch/plan.json" >"$scratch/out" 2>&1
   case $? in 0) ;; 3) echo taken-over; exit 3 ;; *) die "plan write failed: $(head -n 3 "$scratch/out")" ;; esac
   if [[ $v == gap ]]; then
-    "$here/send.sh" --deliver "$plan" "$id" "$msg" || exit 1
+    if ! "$here/send.sh" --deliver "$plan" "$id" "$msg"; then  # the worker never got it: undo the record
+      jq -c . <<<"$orig" >"$scratch/plan.json" && "$here/plan.sh" write "$scratch/plan.json" >/dev/null 2>&1
+      die "$id did not get the follow-up; the plan is as it was"
+    fi
     echo "gap: follow-up sent to $id"
   else
     tag_move "$id"
