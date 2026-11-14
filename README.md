@@ -1,7 +1,7 @@
 # agent-skills
 
 Agent skills in the open [Agent Skills](https://agentskills.io/specification) format, usable
-from Claude Code, Codex, Gemini CLI, Hermes and any other harness that reads `SKILL.md`.
+from Claude Code, Codex, OpenCode, Antigravity, Gemini CLI, Hermes and any other harness that reads `SKILL.md`.
 
 | Skill | What it does |
 | --- | --- |
@@ -45,6 +45,8 @@ with `jq`, `gh` and `superset` (or `paradev`) on `PATH` there.
 | Claude Code | `/orchestrator 340-343, 345 onwards` or "orchestrate 340 to 343" |
 | Codex | `$orchestrator 340-343` |
 | Gemini CLI | "orchestrate issues 340 to 343" (Gemini picks the skill from your words) |
+| OpenCode | "use the orchestrator skill on issues 340 to 343" |
+| Antigravity | `/orchestrator 340-343` |
 | Hermes | `/orchestrator 340-343` |
 
 "orchestrator report back" prints the status table at any time, from any harness. It brings
@@ -52,6 +54,17 @@ the groups and the plan up to date, and never starts or messages a worker. "orch
 continue" resumes a run: it starts items that have become ready and watches again. "orchestrator
 close" ends a run that still has blocked or waiting items; they're kept as carry-over, and the
 next run offers to pick them up again. Workspaces are never archived or deleted.
+
+A run follows one loop. `preflight.sh` checks tools, auth, host, project, plan ownership and
+groups in one call. The orchestrator plans (tracker lookup, free text split into tasks, dependencies,
+waves) and sends one go message with every question at once. Then `watch.sh` runs `cycle.sh`
+(transitions, merge gate, dispatch, tags) without the model and wakes it only with the events since
+the last wake and a `needs` list: an acceptance check to eyeball (`accept`), a worker `question`,
+`blocked`/`dependency-failed`/`held` items for you to decide, or a `stalled` worker. The chat shows
+events only (the plan, the go, each wake, your questions, the finish); a status table appears only
+when `table.sh` prints one. The run ends with `summary.sh` publishing the summary page. Rarely
+needed detail lives in `references/` (`integrations.md`, `approval.md`, `recovery.md`,
+`trackers.md`) and loads only for runs of that shape.
 
 Each repo has one active run at a time. The plan lives in
 `~/.agents/orchestrator/<owner>-<repo>.json`, and finished runs move to
@@ -84,10 +97,12 @@ desktop app, add an agent instance per harness that runs with auto-approve, for 
 | --- | --- |
 | Claude (auto) | `claude --permission-mode auto` |
 | Codex (auto) | `codex --approve-for-me` |
+| OpenCode (auto) | `opencode --auto` |
+| Antigravity (auto) | `agy --mode auto` |
 
 Gemini's default preset already runs with `--approval-mode=auto_edit`. The orchestrator treats
 an instance as auto when its name (`label`) contains `(auto)` or its command and args turn on
-auto-approve (`claude --permission-mode auto`, `codex --approve-for-me`). When it finds none, it
+auto-approve (`claude --permission-mode auto`, `codex --approve-for-me`, `opencode --auto`, `agy --mode auto`). When it finds none, it
 warns you and lists the instances it did find.
 
 What auto mode means:

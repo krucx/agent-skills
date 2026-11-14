@@ -30,12 +30,23 @@ Codex `$<skill> <ID>`; others `Use the <skill> skill to do <ID>.` Then, in order
   waiting on something external that clears itself: print `ORCHESTRATOR_WORKER_WAITING` (below) once per wait, never
   per poll or while implementing. Waiting is not blocked (a block needs the orchestrator or user);
   what it waits on failing is an obstacle; a later DONE/BLOCKED block replaces the wait;
-- done = PR checks finished and mergeable: `gh pr checks <n> --watch --fail-fast` (exit code and
-  failed names only), tail `gh run view <run-id> --log-failed` on failure (never green logs), fix,
-  push, re-watch; confirm `gh pr view <n> --json mergeable,mergeStateStatus,statusCheckRollup`,
-  merging or rebasing the base on conflict; an unfixable check goes in `checked:` by name; a PR with no checks at all: run the project's
-  tests locally and report them in `checked:` ("no PR checks; local: npm test passed"), since the
-  orchestrator merges a PR into an integration branch on that;
+- done = every PR check passed and the PR is mergeable; never DONE while a check is pending or
+  red. Cheaply: `gh pr checks <n> --watch --fail-fast >/dev/null 2>&1; echo exit=$?` (0 = all
+  passed; the table is noise), and only on a non-zero exit `gh pr checks <n> --json
+  name,state,bucket` filtered to the checks outside the `pass` and `skipping` buckets, then tail
+  `gh run view <run-id> --log-failed` (never green logs), fix, push, re-watch; confirm
+  `gh pr view <n> --json mergeable,mergeStateStatus,statusCheckRollup`, merging or rebasing the
+  base on conflict; an unfixable check goes in `checked:` by name; a PR with no checks at all: run
+  the project's tests locally and report them in `checked:` ("no PR checks; local: npm test
+  passed"), since the orchestrator merges a PR into an integration branch on that;
+- local integration only (`local: true`, [integrations](integrations.md)): open no PR and push
+  nothing; run the covering test suites before every commit and the full test command before the
+  last; done = committed and the full command passed, reported as `pr: none (local integration)`
+  and `checked: local: <command> passed`;
+- acceptance criteria: the issue's checklist (free text: the `ask`, one criterion per sentence the
+  worker can check); DONE reports `criteria: <met>/<total>` after `checked:` and, when met < total, one
+  indented `unmet:` line per criterion not met or not verifiable, quoted with why in a few words; no
+  checklist: `n/n` over the criteria the worker derived, listed in `checked:`;
 - end the last message with exactly one block, the marker on its own line (`status.sh` ignores
   mid-sentence markers and blocks still holding `<placeholders>`, so the prompt's own templates
   aren't read as reports):
@@ -47,6 +58,8 @@ pr: <url>
 summary: <one line>
 checked: <what you verified against the task, and the PR's checks in a few words ("5/5
   green"); name only the checks that were red or skipped>
+criteria: <met>/<total>
+  unmet: <a criterion not met or not verifiable, quoted, and why in a few words>
 ```
 
 ```text

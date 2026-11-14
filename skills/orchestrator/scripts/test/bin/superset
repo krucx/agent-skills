@@ -7,11 +7,27 @@
 #   $FIX/create.args      the arguments of the last workspaces create call, one per line
 #   $FIX/no-agents-wait   when present, the CLI has no `agents wait` (an old CLI)
 #   $FIX/agents-wait.log  one line per `agents wait` started: "<pid> <terminal>"
+#   $FIX/pages.args       the arguments of the last pages publish call, one per line
+#   $FIX/pages.log        one line per pages publish call, its --page value (or "-")
+#   $FIX/no-panes-open    when present, the CLI has no `panes open`
+#   $FIX/panes.args       the arguments of the last panes open call, one per line
+#   $FIX/projects.json    superset projects list (default: [{id: p1, name: app}])
+#   $FIX/agents.json      superset agents list (default: Claude and "Claude (auto)")
+#   $FIX/signed-out       when present, auth whoami fails; $FIX/host-down: snapshot fails
 #   $FIX/screens/<tid>    the text terminals read returns for terminal <tid>
+#   $FIX/tags.log         workspaces update calls: "<workspace> <tag>"; $FIX/send.log: terminals send calls:
+#                         "<terminal> <text>"; $FIX/notify.log: notifications show calls (their arguments)
 set -euo pipefail
 arg() { local want=$1; shift; while (($#)); do [[ $1 == "$want" ]] && { echo "$2"; return; }; shift; done; }
 case "$1 ${2:-}" in
-  "snapshot --json") cat "$FIX/snapshot.json" ;;
+  "snapshot --json") [[ ! -f $FIX/host-down ]] || { echo "host not running" >&2; exit 1; }
+    cat "$FIX/snapshot.json" 2>/dev/null || echo '{"workspaces":[]}' ;;
+  "--version"*) echo "2.0.8" ;;
+  "auth whoami") [[ ! -f $FIX/signed-out ]] || { echo "not signed in" >&2; exit 1; }
+    echo '{"email":"me@acme.dev"}' ;;
+  "projects list") cat "$FIX/projects.json" 2>/dev/null || echo '[{"id":"p1","name":"app"}]' ;;
+  "agents list") cat "$FIX/agents.json" 2>/dev/null ||
+    echo '[{"presetId":"claude","label":"Claude","command":"claude","args":[]},{"presetId":"claude-auto","label":"Claude (auto)","command":"claude","args":["--permission-mode","auto"]}]' ;;
   "workspaces list")
     jq -c --arg tag "$(arg --tag "$@")" \
       'map(select($tag == "" or ((.tags // "") | ascii_downcase) == ($tag | ascii_downcase)))' \
@@ -38,5 +54,17 @@ case "$1 ${2:-}" in
       sleep 0.1
     done
     exit 1 ;;
+  "workspaces update") echo "$3 $(arg --tag "$@")" >>"$FIX/tags.log" ;;
+  "terminals send") echo "$(arg --terminal "$@") $(arg --text "$@")" >>"$FIX/send.log" ;;
+  "notifications show") echo "$*" >>"$FIX/notify.log" ;;
+  "pages publish")
+    printf '%s\n' "$@" >"$FIX/pages.args"
+    echo "$(arg --page "$@")" | sed 's/^$/-/' >>"$FIX/pages.log"
+    cp "$3" "$FIX/pages.html"
+    jq -nc --arg id "$(arg --page "$@")" '{id: (if $id == "" then "page-1" else $id end), url: "https://pages.example/run"}' ;;
+  "panes open")
+    [[ ! -f $FIX/no-panes-open ]] || { echo "unknown command: panes open" >&2; exit 1; }
+    [[ " $* " == *" --help "* ]] && exit 0
+    printf '%s\n' "$@" >"$FIX/panes.args" ;;
   *) echo "superset shim: unsupported: $*" >&2; exit 1 ;;
 esac

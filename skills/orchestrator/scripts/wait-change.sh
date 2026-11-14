@@ -5,11 +5,17 @@
 # with no plan, all. Polls every POLL_SECONDS (60); meanwhile, where the CLI has `agents wait`,
 # one per working terminal wakes the script within seconds of a worker settling.
 #
-# Usage: wait-change.sh <project-id> [plan-file] [timeout-seconds]   (default 1200)
+# Noise filter (off with --all-changes): a working<->idle flip is ignored on items the plan has in-review,
+# done, or in feedback with a reason, unless their PR state or conflict flag changes too; and none->working
+# is ignored within 90 seconds of the item's `dispatched` event.
+#
+# Usage: wait-change.sh [--all-changes] <project-id> [plan-file] [timeout-seconds]   (default 1200)
 # Prints "changed: #340 agent working->idle, pr none->OPEN; ..." or "timeout". Failing checks
 # (status.sh already retries) don't stop the wait; still failing at the timeout: error, exit 1.
 set -euo pipefail
 
+allChanges=''
+[[ ${1:-} == --all-changes ]] && { allChanges=1; shift; }
 project=$1
 plan=${2:-}
 timeout=${3:-1200}
@@ -19,6 +25,18 @@ adoptBranches=null
 if [[ -n "$plan" && -f "$plan" ]]; then
   adoptBranches=$(jq -c '[.items[] | select(.workspace == null) | .branch | strings]' "$plan")
 fi
+
+# Items whose agent flips are noise (in-review, done, feedback with a reason), and each item's latest
+# `dispatched` event as epoch seconds; both from the plan on disk.
+quietItems() {
+  [[ -n "$plan" && -f "$plan" ]] || { echo '[]'; return; }
+  jq -c '[.items[] | select(.state == "in-review" or .state == "done" or (.state == "feedback" and (.reason // "") != "")) | .id]' "$plan"
+}
+dispatchedAt() {
+  [[ -n "$plan" && -f "$plan" ]] || { echo '{}'; return; }
+  jq -c '[(.events // [])[] | select(.action == "dispatched" and .item != null)
+      | {key: .item, value: (.at | fromdateiso8601)}] | from_entries' "$plan" 2>/dev/null || echo '{}'
+}
 
 signature() {
   "$here/status.sh" "$project" "$plan" >"$rowsfile" || return
@@ -86,12 +104,20 @@ while :; do
     if [[ -z $start ]]; then
       start=$now
     else
-      changed=$(jq -r --argjson start "$start" '
-        [.[] | . as $now | ([$start[] | select(.id == $now.id)][0]) as $was
+      changed=$(jq -r --argjson start "$start" --argjson quiet "$(quietItems)" --argjson dispatched "$(dispatchedAt)" \
+          --argjson all "${allChanges:-0}" --argjson t "$(date +%s)" '
+        def noise($k; $was; $now; $item):
+          $all == 0 and $k == "agent" and (
+            (($was.agent == "working" and $now.agent == "idle") or ($was.agent == "idle" and $now.agent == "working"))
+              and ($quiet | index($item)) != null
+            or (($was.agent // "none") == "none" and $now.agent == "working" and ($dispatched[$item] // 0) > $t - 90));
+        [.[] | . as $now | ([$start[] | select(.id == $now.id)][0]) as $was | ($now.item // $now.id) as $item
           | select($was != $now)
-          | "\($now.item // $now.id) " + if $was == null then "appeared" else
+          | if $was == null then "\($item) appeared" else
               ([("group", "missing", "agent", "pr", "conflict") as $k | select($was[$k] != $now[$k])
-                | "\($k) \($was[$k] // "none")->\($now[$k] // "none")"] | join(", ")) end]
+                | select(noise($k; $was; $now; $item) | not)
+                | "\($k) \($was[$k] // "none")->\($now[$k] // "none")"] | join(", ")) as $d
+              | select($d != "") | "\($item) \($d)" end]
         | join("; ")' <<<"$now")
       if [[ -n "$changed" ]]; then
         echo "changed: $changed"

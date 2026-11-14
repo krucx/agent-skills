@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Offer dependency chains as integration branches at plan approval, and apply the user's answer.
 #
-# Usage: chains.sh offer  <plan-file>            one JSON line per chain: {"items": [...], "branch": ...}
-#        chains.sh accept <plan-file> <ID>...    make the chain containing each ID its own integration
-#        chains.sh share  <plan-file> <slug>     one feature/<slug> integration for every item
+# Usage: chains.sh offer  <plan-file>                      one JSON line per chain: {"items": [...], "branch": ...}
+#        chains.sh accept <plan-file> [--local] <ID>...    make the chain containing each ID its own integration
+#        chains.sh share  <plan-file> <slug> [--local]     one feature/<slug> integration for every item
+# --local marks the integration `local: true`: the branch lives in this clone only, with no sub-PRs
+# (references/integrations.md, "Local integration branch").
 #
 # A chain is a connected group of two or more items linked by dependsOn (#340 <- #341 <- #342, or a
 # diamond). Only items without an integration (and not an <F>-integrate item) are chained, so once a
@@ -64,24 +66,28 @@ case ${1:-} in
   accept)
     plan=$2
     shift 2
+    islocal=false; [[ ${1:-} != --local ]] || { islocal=true; shift; }
     for id in "$@"; do
       c=$(chains "$plan" | jq -c --arg id "$id" 'select(.items | index($id))')
       [[ -n $c ]] || { echo "$id is in no offered chain" >&2; exit 1; }
       f=$(next_id "$plan")
       b=$(branch_for "$(jq -r .root <<<"$c")" "$(jq -r .title <<<"$c")")
-      apply "$plan" --arg f "$f" --arg b "$b" --arg base "$default_base" --argjson c "$c" \
-        '.integrations = (.integrations // []) + [{id: $f, title: $c.title, branch: $b, base: $base, pr: null, state: "open"}]
+      apply "$plan" --arg f "$f" --arg b "$b" --arg base "$default_base" --argjson c "$c" --argjson local "$islocal" \
+        '.integrations = (.integrations // []) + [{id: $f, title: $c.title, branch: $b, base: $base, pr: null, state: "open"}
+                                                  + (if $local then {local: true} else {} end)]
          | .items |= map(if (.id as $x | $c.items | index($x)) then .integration = $f else . end)'
       echo "added $f $b: $(jq -r '.items | join(", ")' <<<"$c")"
     done ;;
   share)
-    plan=$2 slug=$(slug "${3:?usage: chains.sh share <plan-file> <slug>}" 50)
+    plan=$2 slug=$(slug "${3:?usage: chains.sh share <plan-file> <slug> [--local]}" 50)
     [[ -n $slug ]] || { echo "empty slug" >&2; exit 1; }
+    islocal=false; [[ ${4:-} != --local ]] || islocal=true
     f=$(next_id "$plan")
-    apply "$plan" --arg f "$f" --arg b "feature/$slug" --arg base "$default_base" \
-      '.integrations = (.integrations // []) + [{id: $f, title: $b, branch: $b, base: $base, pr: null, state: "open"}]
+    apply "$plan" --arg f "$f" --arg b "feature/$slug" --arg base "$default_base" --argjson local "$islocal" \
+      '.integrations = (.integrations // []) + [{id: $f, title: $b, branch: $b, base: $base, pr: null, state: "open"}
+                                                + (if $local then {local: true} else {} end)]
        | .items |= map(if (.integration // null) == null and (.integrates // null) == null and .state != "skipped"
                        then .integration = $f else . end)'
     echo "added $f feature/$slug" ;;
-  *) echo "usage: chains.sh offer <plan-file> | accept <plan-file> <ID>... | share <plan-file> <slug>" >&2; exit 64 ;;
+  *) echo "usage: chains.sh offer <plan-file> | accept <plan-file> [--local] <ID>... | share <plan-file> <slug> [--local]" >&2; exit 64 ;;
 esac

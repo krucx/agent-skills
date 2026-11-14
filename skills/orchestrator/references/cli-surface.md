@@ -21,7 +21,7 @@ Use this instead of probing; every row below was checked with `--help` or a call
 | Answer a worker | `superset terminals send --workspace <id> --local --terminal <tid> --text "<answer>"` (`--keys` for raw keys, `--no-submit` to stage) |
 | Linear/Paradev task | `superset tasks get <KEY> --tracker linear --json` |
 | Notify | `superset notifications show` |
-| Publish a page | `superset pages publish <file> [--title t] [--label l]` |
+| Publish a page | `superset pages publish <file> [--title t] [--visibility just_me\|org] [--page <id>]` (summary.sh) |
 
 ## Where 2.x differs from the documented 1.x surface
 
@@ -37,6 +37,23 @@ Use this instead of probing; every row below was checked with `--help` or a call
   (or `--host`). Without either, the default is the cloud when the account has cloud workspaces.
 - `workspaces create` needs `--project` with `--local`, and `--branch` unless `--pr`, `--task` or
   `--checkout local` is given.
+
+## Worker harnesses
+
+Verified on **2026-11-14** against the installed CLIs: OpenCode **2.3.0**, Antigravity **1.5.8**
+(`agy`; its help names itself `antigravity`), Paradev presets from `agents list`. Claude and Codex
+rows are the existing documented forms. The plan item's `agent` is the preset's `presetId`
+(`agy` for Antigravity; `antigravity` is accepted as an alias).
+
+| Harness | Command | First prompt line | Auto-approve args | Regular preset |
+| --- | --- | --- | --- | --- |
+| Claude Code | `claude` | `/<skill> <id>` | `--permission-mode auto` (or `=auto`) | no such args |
+| Codex | `codex` | `$<skill> <id>` | `--approve-for-me` | no such args |
+| OpenCode | `opencode` | `Use the <skill> skill to do <id>.` (its help lists no skill slash command; skills load by name from plain text) | `--auto` | preset default, `args: []` |
+| Antigravity | `agy` | `/<skill> <id>` (help: `--disable-slash-commands` turns off "slash command and skill expansion", so it is on by default) | `--mode auto` or `--dangerously-skip-permissions` | default preset runs `--mode accept-edits`: asks for anything beyond edits, so regular |
+
+Gemini (`--approval-mode=auto_edit`, plain-text first line) and Hermes (`/<skill> <id>`,
+`chat --yolo`) are unchanged. An instance is auto by its args whatever its `label` says.
 
 ## Version-dependent
 

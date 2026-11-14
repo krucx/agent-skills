@@ -10,6 +10,9 @@
 # An <F>-integrate item (integrate.sh; "integrates": "<F>") starts on the integration branch and
 # targets the default branch: its worker merges the default branch in and opens the feature PR.
 #   --preset  agent instance or preset id to start (default: the item's "agent")
+# A local integration (`local: true` on the integration) lives in this clone only: the branch is
+# created here from its base and never pushed, there are no sub-PRs and no CI per item; the worker
+# runs the tests before each commit, and the <F>-integrate worker pushes the branch for the final PR.
 #
 # Steps: SKILL.md's Dispatch. The first failing step stops the run; nothing is written before
 # the plan write. Prints one summary line, or "dispatch <id> failed at <step>: <reason>", exit 1.
@@ -57,17 +60,19 @@ run=$(jq -r '.runId' "$plan")
 default_base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)
 default_base=${default_base:-main}
 # The target: where the item's PR goes. Integrations never nest, so a base is a default branch.
-target=$default_base integ=$(item '.integration // ""')
+target=$default_base ilocal=false integ=$(item '.integration // ""')
 if [[ -n $integ ]]; then
   target=$(jq -r --arg i "$integ" '[.integrations[]? | select(.id == $i) | .branch][0] // empty' "$plan")
   [[ -n $target ]] || fail preflight "item $id names integration $integ, not in the plan"
   ibase=$(jq -r --arg i "$integ" '[.integrations[] | select(.id == $i) | .base][0] // empty' "$plan")
   ibase=${ibase:-$default_base}
+  ilocal=$(jq -r --arg i "$integ" '[.integrations[] | select(.id == $i) | .local // false][0]' "$plan")
 fi
 integrates=$(item '.integrates // ""')
 if [[ -n $integrates ]]; then
   ibranch=$(jq -r --arg i "$integrates" '[.integrations[]? | select(.id == $i) | .branch][0] // empty' "$plan")
   [[ -n $ibranch ]] || fail preflight "item $id integrates $integrates, not in the plan"
+  ilocal=$(jq -r --arg i "$integrates" '[.integrations[] | select(.id == $i) | .local // false][0]' "$plan")
   base=${base:-$ibranch}
   task='the integration job below'
 fi
@@ -77,10 +82,18 @@ stacked=''
 
 # --- 0. integration branch ------------------------------------------------------------------
 if [[ $target != "$default_base" ]]; then
-  out=$(git ls-remote --heads origin "$target") || fail integration "git ls-remote failed"
-  if [[ -z $out ]]; then
-    git fetch -q origin "$ibase" >"$tmp/err" 2>&1 && git push -q origin "FETCH_HEAD:refs/heads/$target" >>"$tmp/err" 2>&1 ||
-      fail integration "cannot create $target from $ibase: $(cat "$tmp/err")"
+  if [[ $ilocal == true ]]; then
+    # local: in this clone from its base, never on origin
+    if ! git show-ref --verify --quiet "refs/heads/$target"; then
+      git fetch -q origin "$ibase" >"$tmp/err" 2>&1 && git branch -q "$target" FETCH_HEAD >>"$tmp/err" 2>&1 ||
+        fail integration "cannot create local $target from $ibase: $(cat "$tmp/err")"
+    fi
+  else
+    out=$(git ls-remote --heads origin "$target") || fail integration "git ls-remote failed"
+    if [[ -z $out ]]; then
+      git fetch -q origin "$ibase" >"$tmp/err" 2>&1 && git push -q origin "FETCH_HEAD:refs/heads/$target" >>"$tmp/err" 2>&1 ||
+        fail integration "cannot create $target from $ibase: $(cat "$tmp/err")"
+    fi
   fi
 fi
 
@@ -128,8 +141,9 @@ tag=$(jq -r '.groups["In Progress"] // empty' "$plan")
 tag=${tag:-In Progress}
 
 case $agent in
-  claude|hermes) first="/$skill $id" ;;
+  claude|hermes|agy|antigravity) first="/$skill $id" ;;
   codex) first="\$$skill $id" ;;
+  opencode) first="Use the $skill skill to do $id." ;;  # no skill slash command; verified in cli-surface.md
   *) first="Use the $skill skill to do $id." ;;
 esac
 others=$(jq -r --arg id "$id" '[.items[] | select(.id != $id) | .id] | join(", ")' "$plan")
@@ -150,12 +164,13 @@ others=$(jq -r --arg id "$id" '[.items[] | select(.id != $id) | .id] | join(", "
   if [[ -n $integrates ]]; then
     epic=$(jq -r --arg i "$integrates" '[.integrations[]? | select(.id == $i) | .epic.url // empty][0] // empty' "$plan")
     prs=$(jq -r --arg i "$integrates" '.items[] | select(.integration == $i) | "  - \(.id) \(.title)\(if .pr then ": " + .pr else "" end)\(if .state == "skipped" then " (dropped, not included)" else "" end)"' "$plan")
-    printf '%s\n' "Integration job: land the feature branch $ibranch on $target with ONE PR; its sub-PRs are already" \
-      "merged into it. They are:" "$prs" \
+    if [[ $ilocal == true ]]; then subs="its tasks' branches are already merged into it in this clone (a local integration: no sub-PRs)"
+    else subs="its sub-PRs are already merged into it"; fi
+    printf '%s\n' "Integration job: land the feature branch $ibranch on $target with ONE PR; $subs. They are:" "$prs" \
       "- Your branch starts at $ibranch. Merge origin/$target into it (\`git fetch origin && git merge origin/$target\`)," \
       "  resolve conflicts, run the project's tests locally, then \`git push origin HEAD:$ibranch\`." \
       "- Open $ibranch -> $target (\`gh pr create --base $target --head $ibranch\`), its description listing every" \
-      "  sub-PR above and linking the epic or issues they close (\`Closes #n\`)${epic:+, and the epic $epic}. Then run the full CI" \
+      "  item above (with its PR where there is one) and linking the epic or issues they close (\`Closes #n\`)${epic:+, and the epic $epic}. Then run the full CI" \
       "  (the PR's checks; none: the local run counts). Push to $ibranch only for the merge and fixes." \
       "- Main is synced only here: don't merge $target into the feature branch at any other time." \
       "  Do not merge the final PR; the user reviews and merges it." ""
@@ -171,9 +186,15 @@ others=$(jq -r --arg id "$id" '[.items[] | select(.id != $id) | .id] | join(", "
       "  HEAD\`, \`git push --force-with-lease\`, and delete the \"merge that first\" line (a squash-merge" \
       "  leaves the parent's commits on your branch, so the PR conflicts until then)."
   fi
-  printf '%s\n' "- Your goal is an open PR: once committed, push and \`gh pr create --base $target\` yourself, even if your skill" \
-    "  stops at a commit. Need a human decision? Ask it plainly and stop." \
-    "- If you hit the same obstacle a second time (same failing command or missing access), don't" \
+  if [[ $ilocal == true && -z $integrates ]]; then
+    printf '%s\n' "- $target is a local integration branch (no sub-PRs, no CI per task): open no PR and push nothing." \
+      "  Commit on $branch and leave it there; the orchestrator merges it into $target on this machine, and" \
+      "  CI runs once on the final $target PR. Need a human decision? Ask it plainly and stop."
+  else
+    printf '%s\n' "- Your goal is an open PR: once committed, push and \`gh pr create --base $target\` yourself, even if your skill" \
+      "  stops at a commit. Need a human decision? Ask it plainly and stop."
+  fi
+  printf '%s\n' "- If you hit the same obstacle a second time (same failing command or missing access), don't" \
     "  retry: print ORCHESTRATOR_WORKER_BLOCKED, \`reason:\` the obstacle, \`needs:\` what would clear" \
     "  it, and stop. Once the PR is open, a PR check you cannot fix is not an obstacle: it goes in" \
     "  \`checked:\`." \
@@ -184,21 +205,38 @@ others=$(jq -r --arg id "$id" '[.items[] | select(.id != $id) | .id] | join(", "
     "  resumes-when: <what ends the wait>" \
     "  Waiting is not blocked: a wait clears on its own, a block needs the orchestrator or a human." \
     "  If what you wait on fails or stops, that's an obstacle as above. When the wait ends, carry on" \
-    "  and finish with a block below; it replaces the wait." \
-    "- Done means the PR's checks finished and it's mergeable, not just open. Before printing" \
-    "  ORCHESTRATOR_WORKER_DONE, run \`gh pr checks <n> --watch --fail-fast\`, reading only its exit" \
-    "  code and failed check names; for a failure tail \`gh run view <run-id> --log-failed\` (never green" \
-    "  checks' logs), fix what your change caused, push, watch again. Then confirm no conflict:" \
-    "  \`gh pr view <n> --json mergeable,mergeStateStatus,statusCheckRollup --jq '{mergeable," \
-    "  mergeStateStatus, failing: [.statusCheckRollup[] | select(.conclusion==\"FAILURE\") | .name]}'\`;" \
-    "  on a conflict merge or rebase the base and push. A check you cannot fix goes in \`checked:\`" \
-    "  by name. If the PR has no checks at all (common on PRs into a feature branch), run the" \
-    "  project's test command locally and report it in \`checked:\`, e.g. \"no PR checks; local: npm" \
-    "  test passed\"; the orchestrator merges a PR into an integration branch only on that." \
+    "  and finish with a block below; it replaces the wait."
+  if [[ $ilocal == true && -z $integrates ]]; then
+    printf '%s\n' "- Before every commit run the test suites that cover what you changed, and the project's full test" \
+      "  command before your last commit; a red test is yours to fix before committing." \
+      "- Done means the branch is committed and the full test command passed. In the DONE block put" \
+      "  \`pr: none (local integration)\` and in \`checked:\` the exact test command and its result, e.g." \
+      "  \"local: npm test passed\"; the orchestrator merges your branch into $target only on that."
+  else
+    printf '%s\n' "- Done means every PR check passed and the PR is mergeable, not just open: never print" \
+      "  ORCHESTRATOR_WORKER_DONE while a check is pending or red. Check cheaply: \`gh pr checks <n>" \
+      "  --watch --fail-fast >/dev/null 2>&1; echo exit=\$?\` (0 = all passed; the table itself is noise), and" \
+      "  only on a non-zero exit \`gh pr checks <n> --json name,state,bucket --jq '.[] | select(.bucket != \"pass\"" \
+      "  and .bucket != \"skipping\") | \"\\(.name): \\(.state)\"'\` for the failed names; then tail" \
+      "  \`gh run view <run-id> --log-failed\` (never green checks' logs), fix what your change caused," \
+      "  push, watch again. Then confirm no conflict:" \
+      "  \`gh pr view <n> --json mergeable,mergeStateStatus,statusCheckRollup --jq '{mergeable," \
+      "  mergeStateStatus, failing: [.statusCheckRollup[] | select(.conclusion==\"FAILURE\") | .name]}'\`;" \
+      "  on a conflict merge or rebase the base and push. A check you cannot fix goes in \`checked:\`" \
+      "  by name. If the PR has no checks at all (common on PRs into a feature branch), run the" \
+      "  project's test command locally and report it in \`checked:\`, e.g. \"no PR checks; local: npm" \
+      "  test passed\"; the orchestrator merges a PR into an integration branch only on that."
+  fi
+  printf '%s\n' "- criteria: the issue's acceptance checklist (for free text, the ask, one criterion per sentence you can" \
+    "  check). Report <met>/<total>; when met < total add one indented \`unmet:\` line per criterion not" \
+    "  met or not verifiable. No checklist: report n/n over the criteria you derived and list them in" \
+    "  \`checked:\`. Omit the \`unmet:\` lines when all are met." \
     "- Finish your last message with exactly one of these, the marker on a line of its own:" \
     "  ORCHESTRATOR_WORKER_DONE" "  item: $id" "  pr: <url>" "  summary: <one line>" \
     "  checked: <what you verified against the task, and the PR's checks in a few words (\"5/5" \
-    "    green\"); name only the checks that were red or skipped>" "  or" \
+    "    green\"); name only the checks that were red or skipped>" \
+    "  criteria: <met>/<total>" \
+    "  unmet: <a criterion not met or not verifiable, quoted, and why in a few words>" "  or" \
     "  ORCHESTRATOR_WORKER_BLOCKED" "  item: $id" "  reason: <what stops you>" \
     "  needs: <the decision or access required>"
 } >"$tmp/prompt"

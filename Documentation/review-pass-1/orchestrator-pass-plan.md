@@ -9,6 +9,8 @@ Scope: `skills/orchestrator` at commit 9baa3eb. Plan only; nothing changed.
 | 12 issues, 2026-11-13 (Sonnet) | 151 | 114K | 25.6M | 224K | 8 of 12 measured: 129K / 18.3M (≈190K / 27M for all 12) |
 | 4-issue epic, 2026-11-14 (Sonnet) | 73 | 26K | 6.2M | 103K | 4 workers: 20K / 2.4M |
 
+Reproduced with `python3 -I skills/orchestrator/scripts/usage.py` (issue #55). A turn is one assistant transcript line with usage. The 4-issue run matches exactly (73 turns, 26K output, 6.2M cache-read, 103K peak). The 12-issue run's first 151 turns (`--turns 151` on the 2026-11-13 session, the orchestrator portion) give 114K output, 724K cache-write, 20.2M cache-read and a 191K peak at that point (224K later in the session), 37 minutes. The 25.6M cache-read figure above does not reproduce from those 151 turns: the transcript shows 20.2M at turn 151, and 25.6M only appears at about turn 178, so the baseline probably counted a longer window. Use 20.2M as the like-for-like baseline. With all twelve worker transcripts found by branch name (`--run 20261113-1424`), workers total 516 turns, 278K output and 42.7M cache-read, so the orchestrator was 41% of worker output and 47% of worker cache-read (the "8 of 12 measured" worker figures above were partial).
+
 So the orchestrator spends about as much as all its workers combined. The bar ("comparable to running the items myself") means the orchestrator should be a small fraction of worker spend, say under 10%.
 
 Per watch cycle today (from the traces): 4 model turns.
@@ -131,3 +133,23 @@ Turns ≈ 2 (preflight, plan) + 1 (go) + judgment events (0.3–0.5 per item) + 
 | `usage.py` and the measured runs | #55 | #54 |
 
 Wave 1: #45, #46, #47, #48. Wave 2: #49, #50, #51. Wave 3: #52, #53. Then #54, then #55.
+
+## 11. After-numbers (issue #55)
+
+Same columns as the section 1 baseline. Target: orchestrator under 10% of worker output and cache-read, no `jq … | plan.sh write` in the transcript, chat output only on events.
+
+| Run | Orchestrator turns | Orchestrator output tokens | Orchestrator cache-read tokens | Peak context | Workers (output / cache-read) | Orchestrator share (output / cache-read) |
+| --- | --- | --- | --- | --- | --- | --- |
+| Dry run, agent-skills, free text, 3 tasks (2026-11-14, Sonnet, run 20261114-1200) | 37 | 10K | 1.8M | 58K | 3 workers: 22K / 2.3M | 45% / 78% |
+| Real run, krucx/Mortgage-Management-App, 4+ items with a chain | not run | not run | not run | not run | not run | not run |
+
+- Dry run, measured with `usage.py <orchestrator transcript> <worker transcripts>` (the orchestrator was a Sonnet subagent of a Claude Code session, so its transcript sits under the session's `subagents/` folder, which `--run` does not search). Tasks: install.sh `--uninstall` (#69), a root `test.sh` (#71), CONTRIBUTING.md (#70); all three accepted on the first eyeball, 0 hand-written plan writes, 6 `watch.sh` wakes, 27 minutes end to end, peak context 58K. Per item against the 12-issue baseline: 12.3 turns (12.6 before), 3.3K output (9.5K), 0.6M cache-read (1.7M). The share target is not met here because the workers were tiny (13–18 turns, 2–7 minutes each), so the orchestrator's fixed cost (reading SKILL.md, the plan, the go exchange, 17 of its 37 turns were chat with no tool call) dominates; the share should be read on the Mortgage run, whose items are real.
+- The Mortgage-Management-App run is deferred to the user. No issues are filed for it.
+
+Acceptance criteria of #55:
+
+- [x] `usage.py` reproduces the Nov 13 baseline from the existing transcript: 151 turns and 114K output match; cache-read is 20.2M, not 25.6M (see section 1).
+- [x] `--run` pairs the orchestrator with its workers and prints the percentage (checked against the 2026-11-13 run).
+- [ ] Both measured runs recorded in this document: partly met. The dry run is recorded above; the Mortgage run is deferred to the user.
+- [ ] The real run's transcript has no hand-written plan writes and a table only at go, wakes with changed rows and finish: unmet, depends on the Mortgage run, deferred to the user.
+- [ ] Misses filed as issues and linked here: unmet, depends on the measured runs; none filed.
