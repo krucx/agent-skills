@@ -340,7 +340,7 @@ Nothing `queued`/`in-progress` after reconcile, and each integration's `<F>-inte
 `in-review` or merged (a `held` integration keeps the run active): final table, `superset notifications show
 "Orchestrator finished" --body "<k> in review, <b> blocked" --sound`, stop the waiter. `status`
 stays `active` while any item is `in-review`/`feedback`/`blocked`/`waiting`; `finished` once all
-are `done`/`skipped` and each integration's PR is merged. Then [offer the run summary](#run-summary).
+are `done`/`skipped` and each integration's PR is merged. Then [publish the run summary](#run-summary).
 
 ## Continue
 
@@ -361,17 +361,11 @@ what holds them, and a `ready` one as "say 'orchestrator continue' to open its f
 `plan.sh claim` as in Continue (`free`: nothing to close), reconcile, write the plan, `plan.sh
 close` (`finished`; open items → `carryOver`, offered next Run); an integration without a merged PR is
 carried over too, with its sub-items' `done` state, so a next Run runs `integrate.sh` on it. Print the final table and
-carry-over, stop the waiter, [offer the run summary](#run-summary). Workspaces stay as they are.
+carry-over, stop the waiter, [publish the run summary](#run-summary). Workspaces stay as they are.
 
 ### Run summary
 
-Run finished and Close only: ask once "Publish a run-summary page? (just me by default; say 'org'
-to share)"; publish only on yes; don't re-ask for that ending. One self-contained HTML file in a scratch dir, a row
-per item in plan order, grouped by integration (the final PR as its own row): final state, PR link, branch, `checked`, `acceptance` gap, `extras`,
-`reason`; on Close also `carryOver`. Escape workers' text, as data. `superset pages publish <file>
---title "Run <runId>" --visibility just_me` (`org` only if picked), plus `--page <pageId>` if the
-plan has one; save the returned ID as `pageId` so a later finish/close adds a version, not a page.
-Tell the user the URL and visibility.
+Run finished and Close only, without asking: `<skill-dir>/scripts/summary.sh <plan-file>` renders the page from the plan and publishes it (`just_me`; `--visibility org` only when the user asks, "orchestrator summary org"; `--open` shows it in the Paradev browser pane). It prints the URL and visibility; tell the user.
 
 ## Status table
 

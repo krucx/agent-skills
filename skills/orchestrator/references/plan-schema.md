@@ -25,7 +25,7 @@
   integration can finish; `epic` (optional): `{id, title, url}` of the parent issue an epic run imported; the final PR links it; `integrates`: on the synthetic `<F>-integrate` item `integrate.sh add`
   creates (no `integration`; targets the default branch, starts on integration `<F>`'s branch), or `null`/absent for an item targeting the default branch. An item's
   **target** is its integration's `branch`, else the default branch; one run may mix both.
-- `pageId`: the run-summary page, once published; later [summaries](../SKILL.md#run-summary) pass
+- `pageId`: the run-summary page, once published; later [summaries](../SKILL.md#run-summary) (`summary.sh`) pass
   it as `--page` to add a version.
 - `ask`: a free-text task's slice of the user's request, verbatim: the task and its whole scope
   (the [acceptance check](../SKILL.md#acceptance-check) grades against it alone). `notes`: the
