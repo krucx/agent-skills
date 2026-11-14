@@ -5,8 +5,9 @@ Load when preflight exits 3 or 4, a run is resumed, or the user says "close".
 One **active run** per repo, owned by an orchestrator terminal (`$SUPERSET_TERMINAL_ID`) with a
 heartbeat. `preflight.sh` runs `plan.sh claim` and reports it:
 
-- `free`: new plan (a finished run moves to `~/.agents/orchestrator/history/`). A following
-  `carryOver` line is a closed run's open items: offer once to re-import them.
+- `free`: new plan (a finished run moves to `~/.agents/orchestrator/history/`). Following
+  `carryOver` and `integrationCarryOver` lines report unfinished standalone items and open
+  integrations respectively; offer once to re-import them.
 - `resumed`: yours; a Run adds items.
 - Exit 3, live owner: start nothing, name its terminal, offer a report back. Only when the user says
   take over: `plan.sh claim --takeover --force`.
@@ -23,9 +24,13 @@ continue' to start them".
 **Continue** reuses the plan's `autoOnly` and group map and never re-asks them. A `waiting`
 item whose dependency was decided by the user is applied before dispatch.
 
-**Close**: `plan.sh close` marks the run `finished`; open items go to `carryOver`, offered at the
-next Run. An integration without a merged PR is carried over with its sub-items' `done` state, so a
-next Run runs `integrate.sh` on it. Print the final table and carry-over, then `summary.sh`.
+**Close**: `plan.sh close` marks the run `finished`. `carryOver` contains every item whose state is
+neither `done` nor `skipped`, with its ID, state, and reason. Separately, `integrationCarryOver`
+contains each integration whose state is open, along with all items assigned to it (including
+`done` items). On the next `plan.sh claim`, these are reported as `carryOver` and
+`integrationCarryOver`; offer the user once to re-import the standalone items and continue the open
+integrations. `claim` archives the closed plan in history. Print the final table and both carry-over
+lists, then `summary.sh`.
 Workspaces stay as they are.
 
 A run stays `active` while any item is `in-review`/`feedback`/`blocked`/`waiting`; `finished` once
