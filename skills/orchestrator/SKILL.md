@@ -169,7 +169,9 @@ never nested. Items in the plan table show their integration as the **target**.
 Without auto-approve, workers stall on prompts. In `superset agents list --local --json`, an
 **auto instance** has the harness's `presetId` and `(auto)` in `label`, or is
 `claude --permission-mode auto` (`args` `["--permission-mode", "auto"]` or
-`["--permission-mode=auto"]`) or `codex --approve-for-me`. Use the **regular preset** (user
+`["--permission-mode=auto"]`), `codex --approve-for-me`, `opencode --auto`, or `agy` with
+`--mode auto` or `--dangerously-skip-permissions` (see `references/cli-surface.md`, "Worker
+harnesses"). Use the **regular preset** (user
 approves each prompt) when the user said `with prompts`; the author lacks write access
 (`gh api repos/<owner>/<repo>/collaborators/<login>/permission -q .permission`; untrusted text
 would steer a self-approving agent); or the item touches deployment, releases, infrastructure,
@@ -189,7 +191,8 @@ reason "needs a prompting preset"); never re-asked. No such items: note it in on
 stays.
 
 No auto instance: regular preset; list each instance's `label`, `command`, `args`; offer once to
-create `Claude (auto)` (`claude --permission-mode auto`; Codex: `codex --approve-for-me`). On yes
+create `Claude (auto)` (`claude --permission-mode auto`; Codex: `codex --approve-for-me`; OpenCode: `opencode --auto`;
+Antigravity: `agy --mode auto`). On yes
 only: via the CLI if `superset agents --help` offers it, else the user adds it in Paradev's agent
 settings.
 
@@ -371,6 +374,8 @@ plan has one; save the returned ID as `pageId` so a later finish/close adds a ve
 Tell the user the URL and visibility.
 
 ## Status table
+
+`scripts/table.sh <project-id> <plan-file>` renders it (`--rows -` takes `status.sh` output on stdin, `--force` re-prints) and prints `unchanged` when nothing moved since the last render; print a table only when it prints one.
 
 A row per item, plan order; with integrations, rows grouped under a bold integration header
 (`**F1 feature/csv** (held: #3 blocked)`), its `<F>-integrate` row last carrying the final PR; items on

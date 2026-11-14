@@ -11,7 +11,14 @@
 #                                 --force takes over even from a live owner, only when the user
 #                                 asks. "free" is followed by the closed run's carryOver, if any.
 #   plan.sh write <json-file>     replace the plan with <json-file> (sets owner and heartbeat);
-#                                 exit 1 if an item's or integration's pr is not a URL string or null
+#                                 exit 1 if an item's or integration's pr is not a URL string or null,
+#                                 an events entry is malformed or an item's criteria is invalid
+#   plan.sh event <item> <action> "<detail>"
+#                                 append one entry to the events log under the lock (owner-checked,
+#                                 exit 3 if not the owner); <item> is an ID, F1 or "null"
+#   plan.sh events [--since <ISO>]
+#                                 print the log, newest last, one JSON line each (read-only);
+#                                 --since prints only entries after that time
 #   plan.sh heartbeat             refresh the heartbeat only
 #   plan.sh close                 finish the run now; items not done or skipped go to carryOver
 #
@@ -29,6 +36,8 @@ me=${SUPERSET_TERMINAL_ID:-unknown}
 # superset, paradev and pdev are the same Paradev CLI; use whichever is installed.
 cli=$(command -v superset || command -v paradev || command -v pdev || true)
 now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+# The fixed list of event actions; keep in step with references/plan-schema.md.
+actions='["dispatched","pr-opened","in-review","merged","pr-merged","tag-moved","follow-up-sent","acceptance-gap","blocked","waiting","skipped","taken-over","finished","closed"]'
 
 lock() {
   mkdir -p "$dir"
@@ -107,6 +116,8 @@ case ${1:-} in
     fi
     jq --arg me "$me" --arg now "$now" --arg was "$current" --argjson forced "$forced" \
       '.owner = $me | .heartbeat = $now | .takenOverFrom = $was
+       | .events = ((.events // []) + [{at: $now, item: null, action: "taken-over",
+                                        detail: "taken over from \($was)\(if $forced then " (forced)" else "" end)"}])
        | if $forced then .forcedAt = $forced else del(.forcedAt) end' "$plan" | put
     echo "taken over from $current${forced:+ (forced)}"
     ;;
@@ -119,6 +130,7 @@ case ${1:-} in
     if [[ $1 == close ]]; then
       [[ -f "$plan" ]] || { echo "no plan to close" >&2; exit 1; }
       jq --arg now "$now" '.status = "finished" | .closedAt = $now
+        | .events = ((.events // []) + [{at: $now, item: null, action: "closed", detail: "run closed"}])
         | .carryOver = [.items[] | select(.state != "done" and .state != "skipped")
                         | {id, state, reason}]' "$plan" | put
       jq -c '.carryOver' "$plan"
@@ -128,7 +140,43 @@ case ${1:-} in
     badpr=$(jq -r '[(.items[]?, .integrations[]?) | select(.pr != null and ((.pr | type) != "string" or (.pr | test("^https?://") | not)))
                     | "\(.id): pr must be a PR URL string, not \(.pr | tojson)"] | .[]' "$2")
     [[ -z "$badpr" ]] || { echo "$badpr" >&2; exit 1; }
+    # events entries carry at, item (an ID or null), action from the fixed list and detail;
+    # criteria is null or {met <= total (integers), unmet: [...]}.
+    badev=$(jq -r --argjson actions "$actions" '
+      (if (.events // []) | type != "array" then "events: must be an array" else empty end),
+      ((.events // []) | if type == "array" then to_entries[] else empty end
+       | select(.value | (type == "object" and (.at | type) == "string" and has("item")
+                          and (.item == null or (.item | type) == "string")
+                          and (.action as $a | $actions | index($a) != null)
+                          and (.detail | type) == "string") | not)
+       | "events[\(.key)]: needs at, item, action (one of the fixed kinds) and detail, got \(.value | tojson)"),
+      ((.items[]? | select(.criteria != null)
+        | select(.criteria | (type == "object" and (.met | type) == "number" and (.total | type) == "number"
+                              and .met == (.met | floor) and .total == (.total | floor) and .met >= 0
+                              and .met <= .total and (.unmet | type) == "array") | not))
+       | "\(.id): criteria needs integer met <= total and an unmet array, got \(.criteria | tojson)")' "$2")
+    [[ -z "$badev" ]] || { echo "$badev" >&2; exit 1; }
     jq --arg me "$me" --arg now "$now" '.owner = $me | .heartbeat = $now' "$2" | put
+    ;;
+  event)
+    [[ $# -eq 4 ]] || { echo 'usage: plan.sh event <item> <action> "<detail>"' >&2; exit 1; }
+    jq -en --argjson actions "$actions" --arg a "$3" '$actions | index($a) != null' >/dev/null ||
+      { echo "unknown event action: $3" >&2; exit 1; }
+    lock
+    [[ -f "$plan" ]] || { echo "no plan" >&2; exit 1; }
+    [[ $(jq -r '.owner // "unknown"' "$plan") == "$me" ]] || { echo "not the owner" >&2; exit 3; }
+    jq --arg now "$now" --arg item "$2" --arg action "$3" --arg detail "$4" \
+      '.events = ((.events // []) + [{at: $now, item: (if $item == "null" or $item == "" then null else $item end),
+                                      action: $action, detail: $detail}])' "$plan" | put
+    ;;
+  events)
+    [[ -f "$plan" ]] || exit 0
+    if [[ ${2:-} == --since ]]; then
+      [[ -n ${3:-} ]] || { echo "--since needs an ISO time" >&2; exit 1; }
+      jq -c --arg since "$3" '(.events // [])[] | select(.at > $since)' "$plan"
+    else
+      jq -c '(.events // [])[]' "$plan"
+    fi
     ;;
   heartbeat)
     lock
@@ -136,7 +184,7 @@ case ${1:-} in
     jq --arg now "$now" '.heartbeat = $now' "$plan" | put
     ;;
   *)
-    sed -n "2,20p" "$0"
+    sed -n "2,27p" "$0"
     exit 1
     ;;
 esac

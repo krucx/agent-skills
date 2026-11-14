@@ -216,6 +216,42 @@ jq '.items[0].pr = "https://github.com/acme/app/pull/388" | .integrations = [{id
 expect_exit "write: URL and null pass" $? 0
 expect "write: URL is stored" "$(jq -r '.items[0].pr' "$plan")" "https://github.com/acme/app/pull/388"
 
+# --- events log and criteria ------------------------------------------------------------------------
+sandbox
+plan_with "[$(item '#5' in-progress w5 t5)]" '{"owner": "me", "heartbeat": "2026-11-12T20:00:00Z"}'
+"$scripts/plan.sh" event '#5' dispatched "workspace w5" >/dev/null; expect_exit "event: appends" $? 0
+"$scripts/plan.sh" event null waiting "quiet" >/dev/null
+expect "event: entry fields" "$(jq -c '.events[0] | {item, action, detail}' "$plan")" '{"item":"#5","action":"dispatched","detail":"workspace w5"}'
+expect "event: null item" "$(jq -c '.events[1].item' "$plan")" null
+out=$("$scripts/plan.sh" event '#5' bogus x 2>&1); expect_exit "event: unknown action refused" $? 1
+expect "event: names the action" "$out" "bogus"
+expect "events: all, one line each" "$("$scripts/plan.sh" events | wc -l | tr -d ' ')" 2
+expect "events: --since filters" "$("$scripts/plan.sh" events --since 2999-01-01T00:00:00Z | wc -l | tr -d ' ')" 0
+expect "events: --since keeps later entries" "$("$scripts/plan.sh" events --since 2000-01-01T00:00:00Z | wc -l | tr -d ' ')" 2
+SUPERSET_TERMINAL_ID=other "$scripts/plan.sh" event '#5' blocked x >/dev/null 2>&1
+expect_exit "event: non-owner exits 3" $? 3
+jq '.events += [{at: "2026-11-12T20:00:00Z", item: "#5", action: "nope", detail: "x"}]' "$plan" >"$root/next.json"
+out=$("$scripts/plan.sh" write "$root/next.json" 2>&1); expect_exit "write: bad event rejected" $? 1
+expect "write: names the event index" "$out" "events[2]"
+jq '.events[0] |= del(.detail)' "$plan" >"$root/next.json"
+out=$("$scripts/plan.sh" write "$root/next.json" 2>&1); expect "write: missing field names index" "$out" "events[0]"
+for bad_c in '{"met":3,"total":2,"unmet":[]}' '{"met":1.5,"total":2,"unmet":[]}' '{"met":1,"total":2,"unmet":"x"}'; do
+  jq --argjson c "$bad_c" '.items[0].criteria = $c' "$plan" >"$root/next.json"
+  out=$("$scripts/plan.sh" write "$root/next.json" 2>&1); code=$?
+  expect_exit "write: criteria $bad_c rejected" $code 1
+  expect "write: names the item" "$out" "#5: criteria"
+done
+jq '.items[0].criteria = {met: 1, total: 2, unmet: ["b"]}' "$plan" >"$root/next.json"
+"$scripts/plan.sh" write "$root/next.json" >/dev/null 2>&1; expect_exit "write: valid criteria passes" $? 0
+jq '.items[0].criteria = null' "$plan" >"$root/next.json"
+"$scripts/plan.sh" write "$root/next.json" >/dev/null 2>&1; expect_exit "write: null criteria passes" $? 0
+"$scripts/plan.sh" close >/dev/null
+expect "close: appends closed event" "$(jq -r '.events[-1].action' "$plan")" closed
+sandbox
+plan_with "[$(item '#5' in-progress w5 t5)]" '{"owner": "orch-1", "heartbeat": "2026-01-01T00:00:00Z"}'
+"$scripts/plan.sh" claim --takeover --force >/dev/null
+expect "takeover: appends taken-over with previous owner" "$(jq -c '.events[-1] | {action, detail}' "$plan")" 'taken-over","detail":"taken over from orch-1'
+
 # --- ownership: live vs stale, and forced takeover (macOS and GNU date parsing) ----------------
 sandbox
 plan_with "[$(item '#6' in-progress w6 t6)]" "{\"owner\": \"orch-1\", \"heartbeat\": \"$(ago 2)\"}"
@@ -359,6 +395,16 @@ expect "dispatch: wait block names what it waits on" "$args" "waiting-on: <what 
 expect "dispatch: waiting is not blocked" "$args" "Waiting is not blocked"
 expect "dispatch: markers go on a line of their own" "$args" "the marker on a line of its own"
 expect_not "dispatch: output never echoes the prompt" "$out" "ORCHESTRATOR_WORKER_DONE"
+
+# first prompt line per harness
+for pair in 'opencode|Use the implement skill to do #20.' 'agy|/implement #20' 'antigravity|/implement #20' \
+  'codex|$implement #20' 'hermes|/implement #20' 'gemini|Use the implement skill to do #20.'; do
+  h=${pair%%|*} line=${pair#*|}
+  dispatch_sandbox
+  jq --arg a "$h" '.items[0].agent = $a' "$plan" >"$plan.tmp" && mv "$plan.tmp" "$plan"
+  dispatch >/dev/null 2>&1
+  expect "dispatch: $h first line" "$(sed -n 1,200p "$FIX/create.args")" $'--prompt\n'"$line"
+done
 
 # collision: remote branch, local branch, plan branch, and a PR each push the name to -2, -3, ...
 dispatch_sandbox
@@ -740,6 +786,46 @@ expect_exit "preflight: that regular preset is not an auto instance, exit 6" "$p
 echo '[{"presetId":"claude","label":"Claude","command":"claude","args":[]},{"presetId":"claude-auto","label":"Claude (auto)","command":"claude","args":[]}]' >"$FIX/agents.json"
 pf; expect "preflight: auto by label" "$(jq -c .presets.claude.auto[0].by <<<"$out")" label
 expect_exit "preflight: report mode does not need an auto instance" "$(echo '[]' >"$FIX/agents.json"; pf --mode report >/dev/null; echo $pf_rc)" 0
+
+# --- table.sh: the status table ---------------------------------------------------------------
+sandbox
+plan_with "[$(item '#1' in-review w1 t1 | jq -c '. + {title: "Cache CI", pr: "https://github.com/acme/app/pull/9", checked: "ran CI"}'),
+  $(item '#2' queued '' '' | jq -c '. + {title: "Split job", dependsOn: ["#1"]}'),
+  $(item '#3' skipped '' '' | jq -c '. + {title: "Vague"}')]"
+ws w1 b-#1 "In Review"; snapshot w1 t1 idle
+echo '[{"headRefName":"b-#1","number":9,"url":"https://github.com/acme/app/pull/9","state":"MERGED","isDraft":false}]' >"$FIX/prs.json"
+printf 'idle\n' >"$FIX/screens/t1"
+out=$("$scripts/table.sh" proj "$plan")
+expect "table: header" "$out" "| Item | Title | Group | Agent | PR |"
+expect "table: reconciled row uses the PR from status" "$out" "| #1 | Cache CI | In Review | done | #9 |"
+expect "table: queued names its dependency" "$out" "| #2 | Split job | Queued (after #1) | — | — |"
+expect "table: skipped" "$out" "| #3 | Vague | Skipped | — | — |"
+expect "table: in-review item's checked is listed below" "$out" "#1 checked: ran CI"
+expect "table: second run is unchanged" "$("$scripts/table.sh" proj "$plan")" "unchanged"
+expect "table: --force prints it anyway" "$("$scripts/table.sh" --force proj "$plan")" "| #1 | Cache CI |"
+rows=$("$scripts/status.sh" proj "$plan")
+same=$("$scripts/table.sh" --force proj "$plan")
+expect "table: rows from stdin equal status.sh's own" "$("$scripts/table.sh" --force --rows - proj "$plan" <<<"$rows")" "$same"
+echo '[{"headRefName":"b-#1","number":9,"url":"https://github.com/acme/app/pull/9","state":"CLOSED","isDraft":false}]' >"$FIX/prs.json"
+out=$("$scripts/table.sh" proj "$plan")
+expect "table: a changed render prints again" "$out" "#1 PR #9 closed unmerged"
+
+# with integrations: grouped, held header, <F>-integrate last
+sandbox
+plan_with "[$(item '#1' done '' '' | jq -c '. + {title: "A", integration: "F1"}'),
+  $(item '#2' blocked '' '' x | jq -c '. + {title: "B | pipes", integration: "F1", reason: "needs info"}'),
+  $(item 'F1-integrate' queued '' '' | jq -c '. + {title: "Open F1 PR", integrates: "F1", dependsOn: ["#1", "#2"]}'),
+  $(item '#4' queued '' '' | jq -c '. + {title: "Plain"}')]" \
+  '{"integrations": [{"id": "F1", "title": "CSV", "branch": "feature/csv", "base": "main", "pr": null, "state": "open"}]}'
+snapshot none none idle
+out=$("$scripts/table.sh" proj "$plan")
+expect "table: integration header with held items" "$out" "| **F1 feature/csv** (held: #2 blocked) | | | | |"
+expect "table: items under the header" "$out" "| #1 | A | Done | — | — |"
+expect "table: pipes in titles are escaped" "$out" 'B \| pipes'
+expect "table: blocked reason below the table" "$out" "#2 blocked: needs info"
+expect "table: default-branch item stays ungrouped, after the group" "$out" "| #4 | Plain | Queued |"
+order=$(grep -n -e '^| #1 ' -e '^| F1-integrate' -e '^| #4 ' <<<"$out" | cut -d'|' -f2 | tr -d ' \n')
+expect "table: <F>-integrate row is last in its group" "$order" "#1F1-integrate#4"
 
 # zsh too, when installed
 if command -v zsh >/dev/null; then
