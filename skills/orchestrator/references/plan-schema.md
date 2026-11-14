@@ -9,7 +9,8 @@
  "items": [{"id": "#340", "title": "…", "integration": null, "ask": null, "notes": null, "extras": null, "dependsOn": [],
  "why": "", "skill": "implement", "agent": "claude", "preset": "auto", "state": "queued",
  "branch": null, "workspace": null, "terminal": null, "pr": null, "checked": null,
- "acceptance": null, "followUp": null}]}
+ "acceptance": null, "followUp": null, "criteria": null}],
+ "events": [{"at": "2026-11-12T20:15:03Z", "item": "#340", "action": "dispatched", "detail": "workspace w340, claude auto"}]}
 ```
 
 - `status`: `active`|`finished`. `state`, `reason`: see SKILL.md. `plan.sh` adds `owner`,
@@ -40,3 +41,16 @@
 - `checked`: the worker's `checked:` line. `acceptance`: `null`, `"ok"`, or the
   [gap](../SKILL.md#acceptance-check). `followUp`: `null` or `{"after": "<ID>", "message": "<text>"}`
   ([after a merge](../SKILL.md#follow-ups-after-a-merge)).
+- `events` (top level, optional; older plans lack it): append-only log of what the orchestrator and
+  its scripts did, so scripts can act without a model turn and nothing happens silently. Entry:
+  `{"at": "<ISO-8601 UTC>", "item": "<ID or F1 or null>", "action": "<kind>", "detail": "<one line>"}`.
+  `action` is one of `dispatched`, `pr-opened`, `in-review`, `merged` (into an integration branch,
+  by us), `pr-merged` (by a human), `tag-moved`, `follow-up-sent`, `acceptance-gap`, `blocked`,
+  `waiting`, `skipped`, `taken-over`, `finished`, `closed`. Append with `plan.sh event <item>
+  <action> "<detail>"` (owner-checked, under the lock); read with `plan.sh events [--since <ISO>]`.
+  `plan.sh close` appends `closed` and `claim --takeover` appends `taken-over` (previous owner in
+  `detail`). `plan.sh write` rejects an entry missing a field or with another action, naming its index.
+- `criteria` (item, optional): what the worker reported about the task's acceptance criteria in its
+  DONE block: `{"met": <n>, "total": <n>, "unmet": ["<criterion>", …]}`, or `null` when it gave none.
+  Written by the orchestrator (later `cycle.sh`) from `status.sh`'s worker block. `plan.sh write`
+  rejects non-integer `met`/`total`, `met` > `total` or a non-array `unmet`, naming the item.
