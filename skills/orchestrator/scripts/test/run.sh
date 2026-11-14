@@ -867,6 +867,25 @@ echo '[{"headRefName":"b-#1","number":9,"url":"https://github.com/acme/app/pull/
 out=$("$scripts/table.sh" proj "$plan")
 expect "table: a changed render prints again" "$out" "#1 PR #9 closed unmerged"
 
+# --- finish.sh: final chat artifacts come from the current plan -------------------------------
+sandbox
+plan_with "[$(item '#1' done '' '' | jq -c '. + {title: "Cache CI"}')]" \
+  '{"events": [
+    {"at": "2026-11-12T20:15:03Z", "item": "#1", "action": "dispatched", "detail": "workspace w1"},
+    {"at": "2026-11-12T20:20:03Z", "item": null, "action": "finished", "detail": "0 in review, 0 blocked"}]}'
+snapshot none none idle
+out=$("$scripts/finish.sh" proj "$plan")
+expect "finish dry-run: table is freshly rendered from the plan" "$out" "| #1 | Cache CI | Done | — | — |"
+expect "finish dry-run: events heading is in chat output" "$out" "Events"
+expect "finish dry-run: complete log includes its first event" "$out" "workspace w1"
+expect "finish dry-run: complete log includes finished last" "$(tail -n 1 <<<"$out")" "| 2026-11-12T20:20:03Z | — | finished | 0 in review, 0 blocked |"
+sandbox
+plan_with '[]' '{"events": []}'
+snapshot none none idle
+out=$("$scripts/finish.sh" proj "$plan")
+expect "finish: empty items are explicit" "$out" "(no items)"
+expect "finish: empty event log is explicit" "$out" "No events recorded."
+
 # with integrations: grouped, held header, <F>-integrate last
 sandbox
 plan_with "[$(item '#1' done '' '' | jq -c '. + {title: "A", integration: "F1"}'),

@@ -61,9 +61,11 @@ waves) and sends one go message with every question at once. Then `watch.sh` run
 (transitions, merge gate, dispatch, tags) without the model and wakes it only with the events since
 the last wake and a `needs` list: an acceptance check to eyeball (`accept`), a worker `question`,
 `blocked`/`dependency-failed`/`held` items for you to decide, or a `stalled` worker. The chat shows
-events only (the plan, the go, each wake, your questions, the finish); a status table appears only
-when `table.sh` prints one. The run ends with `summary.sh` publishing the summary page. Rarely
-needed detail lives in `references/` (`integrations.md`, `approval.md`, `recovery.md`,
+events only (the plan, the go, each wake, your questions, the finish); at finish, the current
+plan-derived status table and complete chronological events log are printed in chat, including the
+`finished` event. Empty item sets and event logs are labelled clearly. At other times, a status
+table appears only when `table.sh` prints one. The run ends with `summary.sh` publishing the summary
+page. Rarely needed detail lives in `references/` (`integrations.md`, `approval.md`, `recovery.md`,
 `trackers.md`) and loads only for runs of that shape.
 
 Each repo has one active run at a time. The plan lives in
