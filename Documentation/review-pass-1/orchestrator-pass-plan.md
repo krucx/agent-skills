@@ -165,16 +165,19 @@ small to use for the efficiency target.
 
 Measured with `python3 -I skills/orchestrator/scripts/usage.py --run 20261114-2058`:
 
-| Run | Orchestrator turns | No-tool turns | Orchestrator output | Worker output | Output share | Orchestrator cache-read | Worker cache-read | Cache-read share | Peak context |
+| Run | Orchestrator turns | Chat-only turns | Orchestrator output | Worker output | Output share | Orchestrator cache-read | Worker cache-read | Cache-read share | Peak context |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `20261114-2058` (11 issues + integration; pre-#78 protocol) | 192 | 86 | 73K | 443K | 16.6% | 22.1M | 46.4M | 47.7% | 157K |
+| `20261114-2058` (11 issues + integration; pre-#78 protocol) | 192 | 41 | 73K | 443K | 16.6% | 22.1M | 46.4M | 47.7% | 157K |
 
-The output target is under 10%, so this baseline misses it. Transcript review found routine
+The output target is under 10%, so this baseline misses it. `usage.py` counts chat-only turns as
+non-empty assistant text messages without a tool call; the previous counter included 45 empty
+assistant continuation turns in its count of 86 no-tool turns. Transcript review found routine
 wait/status narration (for example, messages saying the watcher was still running or nothing had
-changed). Those turns are protocol violations, not necessary judgment events. The events-only rule
-in `skills/orchestrator/SKILL.md` now prohibits that narration, requires silent restarts when a wake
-needs no judgment or user action, and limits judgment updates to the new events that explain the
-decision. Mechanical progress remains in the watcher output and event log.
+changed). Those are the misses this issue addresses; no separate follow-up issue was filed because
+they fall within #78's scope. The events-only rule in `skills/orchestrator/SKILL.md` now prohibits
+that narration, requires silent restarts when a wake needs no judgment or user action, and limits
+judgment updates to the new events that explain the decision. Mechanical progress remains in the
+watcher output and event log.
 
 This transcript predates #78, so it establishes the problem and workload size; it does not verify
 the revised rule. A post-change representative run has not been recorded: the current agent-skills
