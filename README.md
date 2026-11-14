@@ -55,6 +55,17 @@ continue" resumes a run: it starts items that have become ready and watches agai
 close" ends a run that still has blocked or waiting items; they're kept as carry-over, and the
 next run offers to pick them up again. Workspaces are never archived or deleted.
 
+A run follows one loop. `preflight.sh` checks tools, auth, host, project, plan ownership and
+groups in one call. The orchestrator plans (tracker lookup, free text split into tasks, dependencies,
+waves) and sends one go message with every question at once. Then `watch.sh` runs `cycle.sh`
+(transitions, merge gate, dispatch, tags) without the model and wakes it only with the events since
+the last wake and a `needs` list: an acceptance check to eyeball (`accept`), a worker `question`,
+`blocked`/`dependency-failed`/`held` items for you to decide, or a `stalled` worker. The chat shows
+events only (the plan, the go, each wake, your questions, the finish); a status table appears only
+when `table.sh` prints one. The run ends with `summary.sh` publishing the summary page. Rarely
+needed detail lives in `references/` (`integrations.md`, `approval.md`, `recovery.md`,
+`trackers.md`) and loads only for runs of that shape.
+
 Each repo has one active run at a time. The plan lives in
 `~/.agents/orchestrator/<owner>-<repo>.json`, and finished runs move to
 `~/.agents/orchestrator/history/`. The plan records which Paradev terminal owns the run:
