@@ -88,7 +88,7 @@ packet() {
 }
 
 verdict() {
-  local id=${1:-} v=${2:-} text=${3:-} it state pr scratch msg
+  local id=${1:-} v=${2:-} text=${3:-} it state pr msg
   [[ -n $id && ( $v == ok || $v == gap ) ]] || usage
   [[ $v == ok || -n $text ]] || die "a gap needs its text"
   it=$(item "$id"); [[ -n $it ]] || die "no item $id in the plan"

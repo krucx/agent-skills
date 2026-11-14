@@ -1148,6 +1148,98 @@ before=$(jq -S 'del(.heartbeat)' "$plan" | cksum); cyc
 expect_exit "atomic: a failed plan write exits 1" "$rc" 1
 expect "atomic: no follow-up sent, no tag moved, plan unchanged" "$(cat "$FIX/send.log" "$FIX/tags.log" 2>/dev/null)$(jq -S 'del(.heartbeat)' "$plan" | cksum)" "$before"
 
+# --- send.sh and accept.sh ---------------------------------------------------------------------
+acc_plan() { # acc_plan [item-json]: item #1 accepting (workspace w1, terminal t1), the plan owned by me
+  local x=${1:-}; [[ -n $x ]] || x='{}'
+  one accepting "In Progress" idle "$(jq -nc --argjson x "$x" '{pr: "https://github.com/acme/app/pull/9", acceptance: "pending", checked: "CI 4/4 green", criteria: {met: 4, total: 5, unmet: ["docs"]}} + $x')"
+}
+pr_files() { # pr_files <n>: n files in src/ and docs/ of 10 additions, 2 deletions each
+  jq -nc --argjson n "$1" '{files: [range($n) | {path: (if . % 2 == 0 then "src/f\(.).sh" else "docs/f\(.).md" end), additions: 10, deletions: 2}]}' >"$FIX/pr-files.json"
+}
+issue_body() { jq -nc --arg b "$1" '{body: $b}' >"$FIX/issue-1.json"; }
+setplan() { jq "$1" "$plan" >"$FIX/p.tmp" && mv "$FIX/p.tmp" "$plan"; }
+
+acc_plan; "$scripts/send.sh" "$plan" '#1' "hello there" --reason "follow-up sent"; rc=$?
+expect_exit "send: a send exits 0" "$rc" 0
+expect "send: the text goes to the worker's terminal" "$(cat "$FIX/send.log")" "t1 hello there"
+expect "send: --reason moves the item to feedback with it" "$(pf '.state + "/" + .reason')" "feedback/follow-up sent"
+expect "send: the send is an event" "$(jq -r '.events | map(.action + ":" + .detail) | join(" ")' "$plan")" "follow-up-sent:hello there"
+acc_plan; "$scripts/send.sh" "$plan" '#1' "just so"
+expect "send: without --reason the state is untouched" "$(pf .state)" accepting
+acc_plan; setplan '.items[0].terminal = null'; rm -f "$FIX/send.log"
+err=$("$scripts/send.sh" "$plan" '#1' "x" 2>&1); rc=$?
+expect_exit "send: a missing terminal exits 1" "$rc" 1
+expect "send: a missing terminal is named" "$err" "#1 has no terminal"
+expect "send: a missing terminal sends and records nothing" "$(cat "$FIX/send.log" 2>/dev/null)$(jq '.events // [] | length' "$plan")" "0"
+err=$("$scripts/send.sh" "$plan" '#9' "x" 2>&1)
+expect "send: an unknown item is named" "$err" "no item #9"
+acc_plan; setplan '.owner = "someone-else"'; rm -f "$FIX/send.log"
+"$scripts/send.sh" "$plan" '#1' "x" >/dev/null 2>&1
+expect_exit "send: not the owner exits 3" "$?" 3
+expect "send: not the owner sends nothing" "$(cat "$FIX/send.log" 2>/dev/null)" ""
+
+# packet
+acc_plan; issue_body $'## Acceptance criteria\n- [ ] packet shows the diff for a small PR\n- [x] big ones list files\n\nBlocked by #49'
+pr_files 2; printf '%s\n' '+one line' '-another' >"$FIX/pr.diff"
+pk=$("$scripts/accept.sh" packet "$plan")
+expect "packet: names the item and PR" "$pk" "https://github.com/acme/app/pull/9"
+expect "packet: carries the issue's checklist" "$pk" "- [ ] packet shows the diff for a small PR"
+expect_not "packet: leaves the issue's prose out" "$pk" "Blocked by"
+expect "packet: the worker's criteria and unmet lines" "$pk" "criteria 4/5, unmet: docs"
+expect "packet: the worker's checked" "$pk" "checked: CI 4/4 green"
+expect "packet: files with additions and deletions" "$pk" "src/f0.sh +10 -2"
+expect "packet: a small PR includes the diff" "$pk" "+one line"
+expect "packet: small packet is under budget" "$([[ ${#pk} -lt 1100 ]] && echo yes)" yes
+pr_files 40; seq 1 400 | sed 's/^/+/' >"$FIX/pr.diff"
+pk=$("$scripts/accept.sh" packet "$plan")
+expect "packet: a large PR lists names only" "$pk" "diff: omitted (480 lines changed"
+expect_not "packet: a large PR has no diff lines" "$pk" "+399"
+expect "packet: over 15 files are grouped by top-level directory" "$pk" "src/ 20 files +200 -40"
+expect_not "packet: grouped output does not list files" "$pk" "src/f0.sh"
+expect "packet: large packet is under budget" "$([[ ${#pk} -lt 1100 ]] && echo yes)" yes
+pr_files 40; pk=$("$scripts/accept.sh" packet "$plan" --group-over 100 --diff-under 5000)
+expect "packet: --group-over lifts the grouping" "$pk" "src/f0.sh +10 -2"
+pr_files 2; seq 1 400 | sed 's/^/+/' >"$FIX/pr.diff"
+expect "packet: a diff over --diff-under is dropped" "$("$scripts/accept.sh" packet "$plan" --diff-under 5)" "diff: omitted"
+pk=$("$scripts/accept.sh" packet "$plan" --diff-under 100)
+expect "packet: a long diff is cut to fit the budget" "$([[ ${#pk} -lt 1100 ]] && echo yes)$(grep -c 'diff cut' <<<"$pk")" "yes1"
+acc_plan '{"ask": "make the export friendly"}'; pk=$("$scripts/accept.sh" packet "$plan")
+expect "packet: a free-text item shows its ask" "$pk" "criteria: make the export friendly"
+
+# packet default: exactly the accepting items
+acc_plan; setplan '.items += [{id: "#2", state: "in-review", pr: "https://github.com/acme/app/pull/10"}, {id: "#3", state: "accepting", pr: "https://github.com/acme/app/pull/11"}]'
+pr_files 1; : >"$FIX/pr.diff"
+expect "packet: no argument lists the accepting items" "$("$scripts/accept.sh" packet "$plan" | grep '^== ' | cut -c1-5 | tr '\n' ' ')" "== #1 == #3 "
+expect "packet: named IDs pick just those" "$("$scripts/accept.sh" packet "$plan" '#3' | grep -c '^== ')" 1
+acc_plan; setplan '.maxParallel = 0'; cyc
+expect "packet: the default set equals cycle.sh's accept needs" "$(needs)" "accept:#1"
+
+# verdict ok
+acc_plan; rm -f "$FIX/tags.log"; "$scripts/accept.sh" verdict "$plan" '#1' ok >/dev/null; rc=$?
+expect_exit "verdict ok exits 0" "$rc" 0
+expect "verdict ok: acceptance ok, in-review" "$(pf '.acceptance + "/" + .state')" "ok/in-review"
+expect "verdict ok: the tag moves" "$(cat "$FIX/tags.log")" "w1 In Review"
+expect "verdict ok: an in-review event" "$(jq -r '[.events[].action] | join(" ")' "$plan")" "in-review"
+"$scripts/accept.sh" verdict "$plan" '#1' ok >/dev/null 2>&1
+expect_exit "verdict: an item not accepting is refused" "$?" 1
+
+# verdict gap
+acc_plan; rm -f "$FIX/send.log"; "$scripts/accept.sh" verdict "$plan" '#1' gap "4 of 24 screenshots are covered" >/dev/null; rc=$?
+expect_exit "verdict gap exits 0" "$rc" 0
+expect "verdict gap: acceptance is the gap, state feedback with the reason" "$(pf '.acceptance + "/" + .state + "/" + .reason')" "4 of 24 screenshots are covered/feedback/acceptance follow-up"
+expect "verdict gap: the follow-up reaches the terminal" "$(cat "$FIX/send.log")" "t1 4 of 24 screenshots are covered"
+expect "verdict gap: both events" "$(jq -r '[.events[].action] | join(" ")' "$plan")" "acceptance-gap follow-up-sent"
+setplan '.items[0].state = "accepting"'
+err=$("$scripts/accept.sh" verdict "$plan" '#1' gap "another" 2>&1); rc=$?
+expect_exit "verdict gap: a second gap exits 1" "$rc" 1
+expect "verdict gap: a second gap says why" "$err" "never a second round"
+expect "verdict gap: a second gap sends nothing" "$(wc -l <"$FIX/send.log" | tr -d ' ')" 1
+acc_plan; rm -f "$FIX/send.log"; "$scripts/accept.sh" verdict "$plan" '#1' gap "checks not reported" >/dev/null
+expect "verdict gap: a checks gap asks to wait for the checks" "$(cat "$FIX/send.log")" "gh pr checks https://github.com/acme/app/pull/9 --watch --fail-fast"
+acc_plan; setplan '.items[0].terminal = null'
+err=$("$scripts/accept.sh" verdict "$plan" '#1' gap "gap" 2>&1); rc=$?
+expect "verdict gap: a missing terminal is an error and the plan is unchanged" "$rc:$err:$(pf .state)" "1:send: #1 has no terminal in the plan:accepting"
+
 # zsh too, when installed
 if command -v zsh >/dev/null; then
   dispatch_sandbox
