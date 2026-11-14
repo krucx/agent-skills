@@ -1,7 +1,7 @@
 # Plan file schema
 
 ```json
-{"repo": "owner/repo", "runId": "20261112-2015", "status": "active", "maxParallel": 5,
+{"repo": "owner/repo", "runId": "20261112-2015", "startedAt": "2026-11-12T20:15:03Z", "status": "active", "maxParallel": 5,
  "autoApprove": true, "presets": {"claude": ["auto"]}, "autoOnly": {"claude": "accepted"},
  "groups": {"In Progress": "in progress", "Blocked": "new group-6", …},
  "integrations": [{"id": "F1", "title": "…", "branch": "feature/<slug>", "base": "main", "pr": null,
@@ -13,7 +13,9 @@
  "events": [{"at": "2026-11-12T20:15:03Z", "item": "#340", "action": "dispatched", "detail": "workspace w340, claude auto"}]}
 ```
 
-- `status`: `active`|`finished`. `state`, `reason`: see SKILL.md; `cycle.sh` adds the transient state `accepting`
+- `runId` is derived by `plan.sh write` from `startedAt` at creation, in `YYYYMMDD-HHMM` UTC format;
+  later writes preserve both values. `status`: `active`|`finished`. `state`, `reason`: see SKILL.md;
+  `cycle.sh` adds the transient state `accepting`
   (a DONE block arrived, `acceptance` `"pending"`; it becomes `in-review` only through `accept.sh`, and does not count against the parallel limit). `plan.sh` adds `owner`,
   `heartbeat`, `takenOverFrom`, `forcedAt`, `carryOver`; `dispatch.sh` adds `dispatchFailures`
   after a failed workspace creation.
