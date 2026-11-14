@@ -13,7 +13,7 @@ You coordinate (plan, dispatch, watch, move groups, report); never implement, ev
 item gets its own worker, workspace, branch and PR. Outside Claude Code, if you're a top-tier
 model, say once that a smaller one would do (`codex -m <small model>`, `gemini -m <flash model>`).
 
-`superset` = `paradev` = `pdev` (whichever is on PATH; `--help` is authoritative). `<skill-dir>` =
+`superset` = `paradev` = `pdev` (whichever is on PATH; [CLI reference](references/cli-surface.md) first, then `--help`). `<skill-dir>` =
 this file's folder. Run scripts inside the repo. Ad-hoc fan-outs → `superset:orchestrate`, no run;
 free-text work stays here.
 
@@ -28,6 +28,10 @@ free-text work stays here.
 
 All modes; on failure stop with a clear message.
 
+0. **Control surface**: [references/cli-surface.md](references/cli-surface.md) lists the commands
+   and flags verified on Paradev CLI 2.x. Use it; don't run `--help` or schema calls per command.
+   A documented command genuinely missing: one `--help` for that command, use what it lists,
+   note it, dispatch.
 1. `bash`, `jq`, `git`, `gh`, CLI on PATH; `gh auth status`, `superset auth whoami --json` pass.
    `whoami` ok but host calls (`superset snapshot --json`) fail: retry with network/sandbox
    escalation, then point to `superset:doctor`. Never start or restart the host yourself.
