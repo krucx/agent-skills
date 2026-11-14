@@ -89,7 +89,8 @@ table=$(jq -rn --slurpfile plan "$plan" --argjson rows "$(jq -sc . <<<"${rows:-}
           (if $it.extras then "\($it.id) possible follow-up: \($it.extras)" else empty end),
           (if $it.state == "in-review" and ($it.checked // $r.worker.checked) then "\($it.id) checked: \($it.checked // $r.worker.checked)" else empty end)
       ]) as $notes
-    | ["| Item | Title | Group | Agent | PR |", "| --- | --- | --- | --- | --- |"] + $lines
+    | ["| Item | Title | Group | Agent | PR |", "| --- | --- | --- | --- | --- |"]
+      + (if ($items | length) == 0 then ["| (no items) | — | — | — | — |"] else $lines end)
       + (if ($notes | length) > 0 then [""] + $notes else [] end)
     | .[]')
 

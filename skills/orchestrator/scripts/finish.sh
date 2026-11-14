@@ -10,13 +10,7 @@ plan=${2:?usage: finish.sh <project-id> <plan-file>}
 
 here=$(cd "$(dirname "$0")" && pwd)
 rows=$("$here/status.sh" "$project" "$plan")
-table=$(jq -rn --slurpfile plan "$plan" '
-  if (($plan[0].items // []) | length) == 0 then
-    "| Item | Title | Group | Agent | PR |\n| --- | --- | --- | --- | --- |\n| (no items) | — | — | — | — |"
-  else empty end')
-if [[ -z $table ]]; then
-  table=$(jq -c . <<<"${rows:-}" | "$here/table.sh" --force --rows - "$project" "$plan")
-fi
+table=$(jq -c . <<<"${rows:-}" | "$here/table.sh" --force --rows - "$project" "$plan")
 
 printf '%s\n\n' 'Final status' "$table" 'Events'
 jq -r '
