@@ -9,7 +9,7 @@
 #   plan.sh claim [--takeover [--force]]
 #                                 may this session start or resume a run? (exit codes below)
 #                                 --force takes over even from a live owner, only when the user
-#                                 asks. "free" is followed by the closed run's carryOver, if any.
+#                                 asks. "free" is followed by a closed run's carryOver, if any.
 #   plan.sh write <json-file>     replace the plan with <json-file> (sets owner and heartbeat);
 #                                 exit 1 if an item's or integration's pr is not a URL string or null,
 #                                 an events entry is malformed or an item's criteria is invalid
@@ -96,7 +96,14 @@ case ${1:-} in
         old="$dir/history/${repo//\//-}-$(jq -r .runId "$plan").json"
         mkdir -p "$dir/history"
         mv "$plan" "$old"
-        jq -c --arg from "$old" 'select(.carryOver | length > 0) | {carryOver, from: $from}' "$old"
+        jq -c --arg from "$old" '
+          (.items // []) as $items
+          | ([.integrations[]? | select((.state // "open") == "open") as $integration
+              | {integration: $integration,
+                 items: [$items[] | select(.integration == $integration.id)]}]) as $integrations
+          | (.carryOver // []) as $carry
+          | select(($carry | length) > 0 or ($integrations | length) > 0)
+          | {carryOver: $carry, integrationCarryOver: $integrations, from: $from}' "$old"
       fi
       exit 0
     fi
@@ -134,7 +141,10 @@ case ${1:-} in
       jq --arg now "$now" '.status = "finished" | .closedAt = $now
         | .events = ((.events // []) + [{at: $now, item: null, action: "closed", detail: "run closed"}])
         | .carryOver = [.items[] | select(.state != "done" and .state != "skipped")
-                        | {id, state, reason}]' "$plan" | put
+                        | {id, state, reason}]
+        | .integrationCarryOver = ((.items // []) as $items | [.integrations[]? | select((.state // "open") == "open") as $integration
+                                   | {integration: $integration,
+                                      items: [$items[] | select(.integration == $integration.id)]}])' "$plan" | put
       jq -c '.carryOver' "$plan"
       exit 0
     fi

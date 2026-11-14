@@ -26,7 +26,7 @@ ago() {
 
 # A fresh HOME, fixtures dir and git repo per test.
 sandbox() {
-  root=$(mktemp -d "${TMPDIR:-/tmp}/issue-72-orchestrator-detect-opencode-and-issue-73-orchestrator-derive-runid-from.XXXXXX")
+  root=$(mktemp -d "${TMPDIR:-/tmp}/issue-76-orchestrator-preserve-integration-carry.XXXXXX")
   export HOME="$root/home" FIX="$root/fix" SUPERSET_TERMINAL_ID=me
   mkdir -p "$HOME" "$FIX/screens" "$root/repo"
   cd "$root/repo" && git init -q && git remote add origin https://github.com/acme/app.git
@@ -338,6 +338,18 @@ out=$("$scripts/plan.sh" claim)
 expect "close: next claim is free" "$out" free
 expect "close: next claim shows the carry-over" "$out" '"carryOver":[{"id":"#8"'
 expect "close: plan moved to history" "$(ls "$HOME/.agents/orchestrator/history")" "acme-app-20261112-1200.json"
+
+# --- close carries integration state into the next run's claim ---------------------------------
+sandbox
+plan_with '[{"id":"#20","state":"done","integration":"F1"},{"id":"#21","state":"blocked","reason":"needs review","integration":"F1"}]' \
+  '{"integrations":[{"id":"F1","title":"CSV","branch":"feature/csv","base":"main","state":"open","pr":"https://github.com/acme/app/pull/50"},{"id":"F2","branch":"feature/old","base":"main","state":"merged"}]}'
+out=$("$scripts/plan.sh" close)
+expect "close integration: preserves unfinished item carry-over" "$out" '{"id":"#21","state":"blocked","reason":"needs review"}'
+out=$("$scripts/plan.sh" claim)
+carry=$(tail -n1 <<<"$out")
+expect "claim integration: offers branch and base" "$(jq -c '.integrationCarryOver[0].integration | {id, branch, base}' <<<"$carry")" '{"id":"F1","branch":"feature/csv","base":"main"}'
+expect "claim integration: carries participating item states" "$(jq -c '[.integrationCarryOver[0].items[] | {id, state}]' <<<"$carry")" '[{"id":"#20","state":"done"},{"id":"#21","state":"blocked"}]'
+expect_not "claim integration: omits merged integration" "$out" 'feature/old'
 
 # --- conflicting stacked PR: one filtered gh call marks it, with its base ---------------------
 sandbox
