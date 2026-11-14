@@ -330,14 +330,15 @@ When it has a PR set the integration's `pr` (its URL string); when that PR merge
 
 ### Acceptance check
 
-Once per item, before `in-review`: compare `checked` with the acceptance criteria (free-text: the
-`ask` only; older plans: `text`) and the PR's file names and counts (`gh pr view <n> --json files
--q '.files[].path'`; never code). Plainly less (whole file groups unmentioned, e.g. 4 of 24
-screenshots; criteria unaddressed), or `checked` silent on the PR's checks (or "not checked"): ONE follow-up naming
-the gap (CI: wait for `gh pr checks <n> --watch --fail-fast`, report the result); `feedback`,
-reason "acceptance follow-up", `acceptance` = the gap. Else `acceptance` "ok". Never a second
-round; a remaining gap goes under the table. Wanting more than the `ask` is no gap: never send it;
-add it to `extras`, note it under the table as possible follow-up.
+Once per item, before `in-review`: run `<skill-dir>/scripts/accept.sh packet <plan-file>` (one packet per
+`accepting` item: criteria, the worker's `criteria` and `checked`, the PR's files and, for a small PR, its
+diff), read them, and answer every item in one Bash call: `accept.sh verdict <plan-file> <ID> ok` or
+`… <ID> gap "<text>"`; never fetch the issue or PR yourself. A gap is plainly less (whole file groups
+unmentioned, criteria unaddressed) or `checked` silent on the PR's checks; `gap` sends the one follow-up
+(`send.sh`) and sets `feedback`, "acceptance follow-up"; a second `gap` is refused: note the remaining gap
+under the table. Wanting more than the `ask` is no gap: never send it; add it to `extras`, note it under
+the table as possible follow-up. To relay anything else to a worker (a user's answer): `send.sh <plan-file>
+<ID> "<text>" [--reason <r>]`.
 
 ### Follow-ups after a merge
 

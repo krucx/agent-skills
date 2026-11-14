@@ -22,6 +22,8 @@
 # failure stopped the cycle. --dry-run computes the same and writes, sends, merges, dispatches
 # and tags nothing (the plan file is not touched).
 #
+# Follow-ups reach the worker through send.sh --deliver (the plan write records them first).
+#
 # An item whose DONE block arrived (or that is idle with a PR) moves to the state `accepting`,
 # outside the parallel limit, and becomes `in-review` only through accept.sh. Tests: test/run.sh.
 set -uo pipefail
@@ -100,15 +102,14 @@ send() { # send <item-id> <text>: queue the message; flush delivers it once the 
   [[ -z $dry ]] || return 0
   ws=$(field "$1" .workspace); t=$(rowfield "$1" .agent.terminal); [[ -n $t ]] || t=$(field "$1" .terminal)
   [[ -n $ws && -n $t ]] || return 1
-  jq -nc --arg ws "$ws" --arg t "$t" --arg text "$2" --arg id "$1" '{ws: $ws, t: $t, text: $text, id: $id}' >>"$scratch/sends"
+  jq -nc --arg text "$2" --arg id "$1" '{text: $text, id: $id}' >>"$scratch/sends"
 }
 
 deliver() { # send what the plan now records as sent
   local m
   [[ -s $scratch/sends ]] || return 0
   while IFS= read -r m; do
-    "$cli" terminals send --workspace "$(jq -r .ws <<<"$m")" --local --terminal "$(jq -r .t <<<"$m")" \
-      --text "$(jq -r .text <<<"$m")" </dev/null >/dev/null 2>&1 ||
+    "$here/send.sh" --deliver "$plan" "$(jq -r .id <<<"$m")" "$(jq -r .text <<<"$m")" </dev/null >/dev/null 2>&1 ||
       echo "cycle: could not deliver the follow-up to $(jq -r .id <<<"$m")" >&2
   done <"$scratch/sends"
   : >"$scratch/sends"
