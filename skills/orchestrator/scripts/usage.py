@@ -17,7 +17,7 @@ of a session that went on to other work).
 
 --run finds the run's plan (<plans-dir>/<repo>.json when its runId matches, else
 <plans-dir>/history/*-<runId>.json), the orchestrator transcript (the transcript in the repo's
-own project folder with the most orchestrator script calls inside the run's time window) and
+own project folder (--repo-dir, else found from the plan's repo name) with the most orchestrator script calls inside the run's time window) and
 each worker transcript (project folders whose name ends with an item's branch, '/' and '.'
 written as '-'). It prints one table and the orchestrator as a percentage of worker spend.
 """
@@ -95,7 +95,7 @@ def total(rows):
     out = dict.fromkeys(COLS, 0)
     for r in rows:
         for c in COLS:
-            out[c] = max(out[c], r[c]) if c == "peak" else out[c] + r[c]
+            out[c] = max(out[c], r[c]) if c in ("peak", "secs") else out[c] + r[c]
     return out
 
 
@@ -151,14 +151,20 @@ def run_mode(args):
                 for f in sorted(glob.glob(os.path.join(folder, "*.jsonl"))):
                     workers.append((b, f))
     worker_rows = [(b, measure(f)) for b, f in workers]
-    worker_rows = [(b, t) for b, t in worker_rows if t["turns"]]
+    worker_rows = [(b, t) for b, t in worker_rows if t["turns"] and t["first"] is not None]
     lo = min([t["first"] for _, t in worker_rows] or [0]) - 3600
     hi = max([t["last"] for _, t in worker_rows] or [1e18]) + 3600
-    own = os.path.join(args.projects_dir, folder_name(args.repo_dir))
+    if args.repo_dir:
+        homes = [os.path.join(args.projects_dir, folder_name(args.repo_dir))]
+    else:  # the repo's own project folders: named after it, and not a worktree
+        name = plan.get("repo", "").split("/")[-1]
+        homes = [d for d in glob.glob(os.path.join(args.projects_dir, "*-" + name))
+                 if "-worktree-" not in d]
+    own = ", ".join(homes)
     best = None
-    for f in glob.glob(os.path.join(own, "*.jsonl")):
+    for f in [f for h in homes for f in glob.glob(os.path.join(h, "*.jsonl"))]:
         t = measure(f)
-        if not t["turns"] or t["last"] < lo or t["first"] > hi:
+        if not t["turns"] or t["first"] is None or t["last"] < lo or t["first"] > hi:
             continue
         score = t["plan"] + t["cycle"] + t["watch"]
         if best is None or score > best[0]:
@@ -175,7 +181,7 @@ def run_mode(args):
     for label, c in (("output", "output"), ("cache-read", "cache_read")):
         pct = 100.0 * orch[c] / wtot[c] if wtot[c] else float("nan")
         print("orchestrator %s: %s of %s worker %s = %.1f%%" % (label, fmt_tok(orch[c]), fmt_tok(wtot[c]), label, pct))
-    print("model-written plan writes (jq ... | plan.sh write): %d" % orch["hand"])
+    print("hand-written plan writes (jq ... | plan.sh write): %d" % orch["hand"])
 
 
 def main():
@@ -183,7 +189,7 @@ def main():
     ap.add_argument("transcripts", nargs="*")
     ap.add_argument("--run")
     ap.add_argument("--turns", type=int, help="count only the first N turns of each transcript")
-    ap.add_argument("--repo-dir", default=os.getcwd(), help="the repo the orchestrator ran in")
+    ap.add_argument("--repo-dir", help="the repo the orchestrator ran in (default: found from the plan's repo name)")
     ap.add_argument("--projects-dir", default=os.path.expanduser("~/.claude/projects"))
     ap.add_argument("--plans-dir", default=os.path.expanduser("~/.agents/orchestrator"))
     args = ap.parse_args()

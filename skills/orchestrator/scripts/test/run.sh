@@ -1341,7 +1341,7 @@ if command -v python3 >/dev/null; then
   out=$(python3 -I "$scripts/usage.py" --run R1 --repo-dir "$root/repo" --projects-dir "$proj" --plans-dir "$HOME/.agents/orchestrator" 2>&1)
   expect "usage: --run pairs a worker" "$out" "worker issue-7-thing"
   expect "usage: --run prints the percentage" "$out" "orchestrator output: 150 of 500 worker output = 30.0%"
-  expect "usage: --run counts hand-written plan writes" "$out" "plan writes (jq ... | plan.sh write): 1"
+  expect "usage: --run counts hand-written plan writes" "$out" "hand-written plan writes (jq ... | plan.sh write): 1"
 fi
 
 # zsh too, when installed
