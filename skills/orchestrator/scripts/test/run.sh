@@ -1240,6 +1240,82 @@ acc_plan; setplan '.items[0].terminal = null'
 err=$("$scripts/accept.sh" verdict "$plan" '#1' gap "gap" 2>&1); rc=$?
 expect "verdict gap: a missing terminal is an error and the plan is unchanged" "$rc:$err:$(pf .state)" "1:send: #1 has no terminal in the plan:accepting"
 
+# --- wait-change noise filter + watch.sh -------------------------------------------------------
+noise_sandbox() { # #1 in-review idle, #2 in-progress working; events carry #2's dispatch <age> seconds ago
+  dispatch_sandbox
+  plan_with "[$(item '#1' in-review w1 t1), $(item '#2' in-progress w2 t2)]" '{"maxParallel": 0}'
+  ws w1 'b-#1' "In Review"; ws w2 'b-#2' "In Progress"
+  snap w1:t1:idle w2:t2:working
+}
+nw() { POLL_SECONDS=1 "$scripts/wait-change.sh" "$@" proj "$plan" 3 2>&1; }
+flip() { (sleep 1; snap "$@") & }
+
+noise_sandbox; flip w1:t1:working w2:t2:working
+expect "noise: idle->working on an in-review item is ignored" "$(nw)" "timeout"
+noise_sandbox; flip w1:t1:working w2:t2:working
+expect "noise: --all-changes keeps it" "$(nw --all-changes)" "changed: #1 agent idle->working"
+noise_sandbox; flip w1:t1:idle w2:t2:idle
+expect "noise: working->idle on an in-progress item still counts" "$(nw)" "changed: #2 agent working->idle"
+noise_sandbox; jq '(.items[] | select(.id == "#1")) |= (.state = "feedback" | .reason = "follow-up sent")' "$plan" >"$FIX/p.tmp" && mv "$FIX/p.tmp" "$plan"
+flip w1:t1:working w2:t2:working
+expect "noise: feedback with a reason is ignored" "$(nw)" "timeout"
+noise_sandbox; jq '(.items[] | select(.id == "#1")) |= (.state = "feedback" | .reason = null)' "$plan" >"$FIX/p.tmp" && mv "$FIX/p.tmp" "$plan"
+flip w1:t1:working w2:t2:working
+expect "noise: feedback without a reason still counts" "$(nw)" "changed: #1 agent idle->working"
+noise_sandbox; (sleep 1; prs 'b-#1' OPEN 9 '{"mergeable": "CONFLICTING"}') &
+expect "noise: a conflict flag on a quiet item still counts" "$(nw)" "changed: #1 pr none->OPEN, conflict none->true"
+noise_sandbox; (sleep 1; prs 'b-#1' MERGED 9) &
+expect "noise: a PR state change on a quiet item still counts" "$(nw)" "changed: #1 pr none->MERGED"
+
+# none->working within 90s of the dispatched event
+noise_sandbox; snap w1:t1:idle none:none:idle
+dispatched() { jq --arg at "$1" '.events = [{at: $at, item: "#2", action: "dispatched", detail: "x"}]' "$plan" >"$FIX/p.tmp" && mv "$FIX/p.tmp" "$plan"; }
+jq -n '{workspaces: [{id: "w1", terminals: [{id: "t1", agent: {id: "claude", state: "idle"}}]}, {id: "w2", terminals: []}, {id: "orch", terminals: []}]}' >"$FIX/snapshot.json"
+dispatched "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+flip w1:t1:idle w2:t2:working
+expect "noise: none->working just after dispatch is ignored" "$(nw)" "timeout"
+noise_sandbox
+jq -n '{workspaces: [{id: "w1", terminals: [{id: "t1", agent: {id: "claude", state: "idle"}}]}, {id: "w2", terminals: []}, {id: "orch", terminals: []}]}' >"$FIX/snapshot.json"
+dispatched "$(ago 5)"
+flip w1:t1:idle w2:t2:working
+expect "noise: none->working long after dispatch counts" "$(nw)" "changed: #2 agent none->working"
+noise_sandbox
+jq -n '{workspaces: [{id: "w1", terminals: [{id: "t1", agent: {id: "claude", state: "idle"}}]}, {id: "w2", terminals: []}, {id: "orch", terminals: []}]}' >"$FIX/snapshot.json"
+dispatched "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+flip w1:t1:idle w2:t2:working
+expect "noise: --all-changes keeps none->working after dispatch" "$(nw --all-changes)" "changed: #2 agent none->working"
+
+# watch.sh
+wt() { out=$(POLL_SECONDS=1 "$scripts/watch.sh" "$@" proj "$plan" "${WT:-15}" 2>"$FIX/watch.err"); rc=$?; }
+noise_sandbox; prs 'b-#1' OPEN 9
+(sleep 1; prs 'b-#1' MERGED 9) &
+(sleep 5; printf '%s\n' "ORCHESTRATOR_WORKER_DONE" "item: #2" "pr: https://github.com/acme/app/pull/10" "summary: s" "checked: 1/1 green" "" >"$FIX/screens/t2"; snap w2:t2:idle) &
+wt
+expect_exit "watch: a merge is handled alone, a DONE block ends it with exit 10" "$rc" 10
+expect "watch: the merge produced an event line" "$out" " #1 pr-merged "
+expect "watch: the DONE block is an accept need" "$(grep '^\[' <<<"$out")" '"kind":"accept","item":"#2"'
+expect "watch: the last line is needs 1" "$(tail -n 1 <<<"$out")" "needs 1"
+expect "watch: the needs JSON follows the events and precedes the last line" "$(tail -n 2 <<<"$out" | head -n 1 | cut -c1-1)" "["
+expect "watch: event lines start HH:MM" "$(grep pr-merged <<<"$out")" "$(date -u +%H):"
+noise_sandbox; WT=3 wt
+expect_exit "watch: quiet timeout exits 0" "$rc" 0
+expect "watch: an empty events list is printed, not absent" "$out" "events: none"
+expect "watch: timeout is the last line" "$(tail -n 1 <<<"$out")" "timeout"
+expect "watch: every cycle refreshes the heartbeat" "$(jq -r '.heartbeat' "$plan" | cut -c1-13)" "$(date -u +%Y-%m-%dT%H)"
+noise_sandbox; jq '.owner = "someone-else"' "$plan" >"$FIX/p.tmp" && mv "$FIX/p.tmp" "$plan"
+(sleep 1; snap w1:t1:idle w2:t2:idle) &
+wt
+expect_exit "watch: takeover exits 3" "$rc" 3
+expect "watch: takeover prints taken-over last" "$(tail -n 1 <<<"$out")" "taken-over"
+noise_sandbox; jq '.items |= map(.state = "done")' "$plan" >"$FIX/p.tmp" && mv "$FIX/p.tmp" "$plan"
+(sleep 1; snap none:none:idle) &
+wt
+expect "watch: a finished run prints finished" "$(tail -n 1 <<<"$out")" "finished"
+expect_exit "watch: finished exits 0" "$rc" 0
+noise_sandbox; touch "$FIX/host-down"; WT=3 wt
+expect_exit "watch: an error exits 1" "$rc" 1
+expect "watch: an error says why" "$(tail -n 1 <<<"$out")" "error: "
+
 # zsh too, when installed
 if command -v zsh >/dev/null; then
   dispatch_sandbox
