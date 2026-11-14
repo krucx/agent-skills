@@ -32,6 +32,8 @@
   beyond the `ask`, for the human only (possible follow-ups; never sent to the worker). All three
   `null` for tracker items (the issue body is the user's text). `text`: an older plan's single
   free-text description, still loaded and dispatched; ignored when `ask` is set.
+- `pr` (item and integration): `null`, or the full PR URL string (`"https://github.com/owner/repo/pull/388"`),
+  never a bare number or `"#388"`; the scripts read it as a string and `plan.sh write` rejects anything else.
 - `preset`: `auto`|`regular`. `presets`: per harness, the kinds
   [preflight](../SKILL.md#worker-agents-and-auto-approval) found. `autoOnly`: per auto-only
   harness, the user's `"accepted"`/`"declined"` (absent: not asked yet).

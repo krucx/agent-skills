@@ -244,7 +244,7 @@ background work still running is skipped likewise.
 
 | Seen | Do |
 | --- | --- |
-| `in-progress`, PR exists | Once `checked:` is out (or `idle`): save it, [acceptance check](#acceptance-check), `in-review` (don't wait for CI). |
+| `in-progress`, PR exists | Record its full URL as `pr` (a string, never the number). Once `checked:` is out (or `idle`): save it, [acceptance check](#acceptance-check), `in-review` (don't wait for CI). |
 | `in-review`, `working` | User is giving feedback: `feedback` (outside the limit). |
 | `feedback`, reason "follow-up sent"/"acceptance follow-up", `working` | Clear the reason. |
 | `feedback`, `idle` | Reason still set: wait. Else `in-review`; after an acceptance follow-up, re-compare once, keeping a remaining gap. |
@@ -298,7 +298,7 @@ check <plan-file>` gives each open integration a verdict:
 
 `<F>-integrate` follows the usual transitions; its PR is the integration's final PR (the user's to
 review and merge, as for any default-branch PR; never [merged here](#merging-into-an-integration-branch)).
-When it has a PR set the integration's `pr`; when that PR merges set `state` `merged`.
+When it has a PR set the integration's `pr` (its URL string); when that PR merges set `state` `merged`.
 
 ### Acceptance check
 

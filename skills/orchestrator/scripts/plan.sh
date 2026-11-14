@@ -10,7 +10,8 @@
 #                                 may this session start or resume a run? (exit codes below)
 #                                 --force takes over even from a live owner, only when the user
 #                                 asks. "free" is followed by the closed run's carryOver, if any.
-#   plan.sh write <json-file>     replace the plan with <json-file> (sets owner and heartbeat)
+#   plan.sh write <json-file>     replace the plan with <json-file> (sets owner and heartbeat);
+#                                 exit 1 if an item's or integration's pr is not a URL string or null
 #   plan.sh heartbeat             refresh the heartbeat only
 #   plan.sh close                 finish the run now; items not done or skipped go to carryOver
 #
@@ -123,6 +124,10 @@ case ${1:-} in
       jq -c '.carryOver' "$plan"
       exit 0
     fi
+    # pr is the full PR URL or null: dispatch.sh and merge.sh read it as a string.
+    badpr=$(jq -r '[(.items[]?, .integrations[]?) | select(.pr != null and ((.pr | type) != "string" or (.pr | test("^https?://") | not)))
+                    | "\(.id): pr must be a PR URL string, not \(.pr | tojson)"] | .[]' "$2")
+    [[ -z "$badpr" ]] || { echo "$badpr" >&2; exit 1; }
     jq --arg me "$me" --arg now "$now" '.owner = $me | .heartbeat = $now' "$2" | put
     ;;
   heartbeat)
@@ -131,7 +136,7 @@ case ${1:-} in
     jq --arg now "$now" '.heartbeat = $now' "$plan" | put
     ;;
   *)
-    sed -n '2,19p' "$0"
+    sed -n "2,20p" "$0"
     exit 1
     ;;
 esac
