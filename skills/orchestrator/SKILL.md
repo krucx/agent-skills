@@ -35,8 +35,10 @@ scripts inside the repo. Never write jq against the plan: only `plan.sh write` c
    `needs` JSON. `cycle.sh` alone for a one-off pass.
 5. **Act on each `needs`** (below), then restart `watch.sh`. Exit `finished`: step 6;
    `taken-over`: stop, tell the user.
-6. **Finish**: `summary.sh <plan-file>` publishes the run summary page without asking; tell the
-   user the URL.
+6. **Finish**: `finish.sh <project-id> <plan-file>` prints the current plan-derived status table
+   and complete chronological events log in chat (including the `finished` event; empty items and
+   events are called out explicitly). Then `summary.sh <plan-file>` publishes the run summary page
+   without asking; tell the user the URL.
 
 ## Planning
 
@@ -94,8 +96,10 @@ merge ("redo the config once #341 lands") is recorded as the item's `followUp` i
 ## Reporting
 
 Events only: the plan, the go, a wake with the events since the last one, answers to the user's
-questions, the finish. No status table of your own: print one only when `table.sh <project-id>
-<plan-file>` prints one (it prints `unchanged` otherwise). Below it, only what needs the user:
+questions, the finish. At finish, `finish.sh` prints both the current status table (using
+`table.sh --force`) and the complete events log from the plan. At other times, no status table of
+your own: print one only when `table.sh <project-id> <plan-file>` prints one (it prints `unchanged`
+otherwise). Below it, only what needs the user:
 worker questions, blocked reasons, stalls, dependency decisions, acceptance gaps, possible
 follow-ups (`extras`), a just-in-review item's `checked`.
 

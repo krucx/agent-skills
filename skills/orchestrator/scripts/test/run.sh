@@ -852,6 +852,18 @@ echo '[{"presetId":"claude","label":"Claude","command":"claude","args":["--permi
 pf
 expect "preflight: regular preset that auto-approves is flagged" "$(jq -c .presets.claude.regular[0].autoApproves <<<"$out")" true
 expect_exit "preflight: that regular preset is not an auto instance, exit 6" "$pf_rc" 6
+echo '[{"presetId":"opencode","label":"OpenCode","command":"opencode","args":["run","--auto"]}]' >"$FIX/agents.json"
+pf --harness opencode; expect_exit "preflight: OpenCode auto flag exits 0" "$pf_rc" 0
+expect "preflight: OpenCode detected by args without auto label" "$(jq -c .presets.opencode.auto[0].by <<<"$out")" args
+echo '[{"presetId":"opencode","label":"OpenCode","command":"opencode","args":["run","--auto-approve"]}]' >"$FIX/agents.json"
+pf --harness opencode; expect_exit "preflight: OpenCode near-miss flag remains regular" "$pf_rc" 6
+echo '[{"presetId":"agy","label":"Antigravity","command":"agy","args":["--mode","auto"]}]' >"$FIX/agents.json"
+pf --harness antigravity; expect_exit "preflight: Antigravity auto mode exits 0" "$pf_rc" 0
+expect "preflight: Antigravity detected by args without auto label" "$(jq -c .presets.antigravity.auto[0].by <<<"$out")" args
+echo '[{"presetId":"agy","label":"Antigravity","command":"agy","args":["--mode","accept-edits"]}]' >"$FIX/agents.json"
+pf --harness antigravity; expect_exit "preflight: Antigravity regular mode stays regular" "$pf_rc" 6
+echo '[{"presetId":"agy","label":"Antigravity","command":"agy","args":["--dangerously-skip-permissions"]}]' >"$FIX/agents.json"
+pf --harness antigravity; expect_exit "preflight: Antigravity skip permissions exits 0" "$pf_rc" 0
 echo '[{"presetId":"claude","label":"Claude","command":"claude","args":[]},{"presetId":"claude-auto","label":"Claude (auto)","command":"claude","args":[]}]' >"$FIX/agents.json"
 pf; expect "preflight: auto by label" "$(jq -c .presets.claude.auto[0].by <<<"$out")" label
 expect_exit "preflight: report mode does not need an auto instance" "$(echo '[]' >"$FIX/agents.json"; pf --mode report >/dev/null; echo $pf_rc)" 0
@@ -878,6 +890,25 @@ expect "table: rows from stdin equal status.sh's own" "$("$scripts/table.sh" --f
 echo '[{"headRefName":"b-#1","number":9,"url":"https://github.com/acme/app/pull/9","state":"CLOSED","isDraft":false}]' >"$FIX/prs.json"
 out=$("$scripts/table.sh" proj "$plan")
 expect "table: a changed render prints again" "$out" "#1 PR #9 closed unmerged"
+
+# --- finish.sh: final chat artifacts come from the current plan -------------------------------
+sandbox
+plan_with "[$(item '#1' done '' '' | jq -c '. + {title: "Cache CI"}')]" \
+  '{"events": [
+    {"at": "2026-11-12T20:15:03Z", "item": "#1", "action": "dispatched", "detail": "workspace w1"},
+    {"at": "2026-11-12T20:20:03Z", "item": null, "action": "finished", "detail": "0 in review, 0 blocked"}]}'
+snapshot none none idle
+out=$("$scripts/finish.sh" proj "$plan")
+expect "finish dry-run: table is freshly rendered from the plan" "$out" "| #1 | Cache CI | Done | — | — |"
+expect "finish dry-run: events heading is in chat output" "$out" "Events"
+expect "finish dry-run: complete log includes its first event" "$out" "workspace w1"
+expect "finish dry-run: complete log includes finished last" "$(tail -n 1 <<<"$out")" "| 2026-11-12T20:20:03Z | — | finished | 0 in review, 0 blocked |"
+sandbox
+plan_with '[]' '{"events": []}'
+snapshot none none idle
+out=$("$scripts/finish.sh" proj "$plan")
+expect "finish: empty items are explicit" "$out" "(no items)"
+expect "finish: empty event log is explicit" "$out" "No events recorded."
 
 # with integrations: grouped, held header, <F>-integrate last
 sandbox
@@ -1431,6 +1462,35 @@ expect "noise: --all-changes keeps none->working after dispatch" "$(nw --all-cha
 
 # watch.sh
 wt() { out=$(POLL_SECONDS=1 "$scripts/watch.sh" "$@" proj "$plan" "${WT:-15}" 2>"$FIX/watch.err"); rc=$?; }
+# A finish observed by a cycle must end this watch iteration without entering another wait.
+watch_fixture="$FIX/issue-74-orchestrator-verify-watch-sh"
+mkdir -p "$watch_fixture"
+cp "$scripts/watch.sh" "$watch_fixture/watch.sh"
+cat >"$watch_fixture/cycle.sh" <<'EOF'
+#!/usr/bin/env bash
+count=0
+[[ ! -f $FIX/issue-74-orchestrator-verify-watch-sh/cycles ]] || count=$(cat "$FIX/issue-74-orchestrator-verify-watch-sh/cycles")
+count=$((count + 1))
+echo "$count" >"$FIX/issue-74-orchestrator-verify-watch-sh/cycles"
+if ((count == 1)); then
+  echo '{"events":[],"needs":[],"finished":false,"table":null}'
+else
+  echo '{"events":[{"at":"2026-11-15T12:34:00Z","item":null,"action":"finished","detail":"0 in review, 0 blocked"}],"needs":[],"finished":true,"table":null}'
+fi
+EOF
+cat >"$watch_fixture/wait-change.sh" <<'EOF'
+#!/usr/bin/env bash
+count=0
+[[ ! -f $FIX/issue-74-orchestrator-verify-watch-sh/waits ]] || count=$(cat "$FIX/issue-74-orchestrator-verify-watch-sh/waits")
+echo $((count + 1)) >"$FIX/issue-74-orchestrator-verify-watch-sh/waits"
+echo changed
+EOF
+chmod +x "$watch_fixture/watch.sh" "$watch_fixture/cycle.sh" "$watch_fixture/wait-change.sh"
+FIX="$FIX" out=$(FIX="$FIX" "$watch_fixture/watch.sh" proj "$plan" 10 2>"$FIX/issue-74-watch.err"); rc=$?
+expect_exit "watch: finish during an iteration exits with documented status" "$rc" 0
+expect "watch: finished cycle is not followed by another wait" "$(cat "$watch_fixture/waits")" 1
+expect "watch: one finished event is emitted" "$(grep -c 'finished 0 in review, 0 blocked' <<<"$out")" 1
+expect "watch: finished is the final output line" "$(tail -n 1 <<<"$out")" finished
 noise_sandbox; prs 'b-#1' OPEN 9
 (sleep 1; prs 'b-#1' MERGED 9) &
 (sleep 5; printf '%s\n' "ORCHESTRATOR_WORKER_DONE" "item: #2" "pr: https://github.com/acme/app/pull/10" "summary: s" "checked: 1/1 green" "" >"$FIX/screens/t2"; snap w2:t2:idle) &

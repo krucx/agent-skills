@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# The watch loop without the model: wait-change.sh, then cycle.sh, repeat, until cycle.sh reports a
-# need, the run finishes, the plan is taken over, or the timeout passes. Every cycle refreshes the
-# plan's heartbeat, so a long quiet watch keeps it owned. Background it once; wake only on exit.
+# The watch loop without the model: cycle.sh, then wait-change.sh before the next cycle, until
+# cycle.sh reports a need, the run finishes, the plan is taken over, or the timeout passes. Every
+# cycle refreshes the plan's heartbeat, so a long quiet watch keeps it owned. Background it once;
+# wake only on exit.
 #
 # Usage: watch.sh [--all-changes] <project-id> <plan-file> [timeout-seconds]   (default 1200)
 #   --all-changes   wait-change.sh without its noise filter
@@ -18,7 +19,7 @@ flags=()
 (($# >= 2 && $# <= 3)) || { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 1; }
 project=$1 plan=$2 timeout=${3:-1200}
 here=$(cd "$(dirname "$0")" && pwd)
-scratch=$(mktemp -d "${TMPDIR:-/tmp}/watch.XXXXXX")
+scratch=$(mktemp -d "${TMPDIR:-/tmp}/issue-74-orchestrator-verify-watch-sh.watch.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -35,11 +36,16 @@ finish() { # finish <exit code> <last line>
 fail() { finish 1 "error: $*"; }
 
 deadline=$((SECONDS + timeout))
+first=1
 while :; do
   left=$((deadline - SECONDS))
   ((left > 0)) || finish 0 timeout
-  "$here/wait-change.sh" ${flags[@]+"${flags[@]}"} "$project" "$plan" "$left" >"$scratch/wait" 2>"$scratch/err" ||
-    fail "wait-change.sh: $(tail -n 1 "$scratch/err")"
+  if [[ -z $first ]]; then
+    "$here/wait-change.sh" ${flags[@]+"${flags[@]}"} "$project" "$plan" "$left" >"$scratch/wait" 2>"$scratch/err" ||
+      fail "wait-change.sh: $(tail -n 1 "$scratch/err")"
+  else
+    first=''
+  fi
 
   "$here/cycle.sh" "$project" "$plan" >"$scratch/cycle" 2>"$scratch/err"
   rc=$?
