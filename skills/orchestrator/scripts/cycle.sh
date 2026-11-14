@@ -8,6 +8,12 @@
 # integrations; dispatch; tags re-applied; finished detection. Every action appends a plan event;
 # the plan is written through plan.sh write (before the steps that read it from disk, and at the end).
 #
+# Atomicity: until the first plan write the cycle only computes; worker messages are queued and
+# sent after the write that records them, so a failed write (exit 1) leaves the plan, the workers
+# and the tags as they were (only the heartbeat moves). Irreversible steps (a merge, a dispatch) are
+# recorded by a plan write right after them. What a later failure can leave: earlier phases of this
+# cycle already written and applied, never an applied action missing from the plan.
+#
 # Output, one JSON object: {"events": [new events], "needs": [...], "finished": bool, "table": <md|null>}
 #   needs: {"kind", "item", "detail"}, kind one of accept | question | blocked | dependency-failed |
 #          stalled | stale-wait | held | closed-pr (the judgment calls; "table" is table.sh's render
@@ -75,6 +81,7 @@ flush() {
   "$here/plan.sh" write "$scratch/plan.json" >"$scratch/out" 2>&1
   case $? in 0) ;; 3) taken ;; *) die "plan write failed: $(head -n 3 "$scratch/out")" ;; esac
   P=$(jq -c . "$plan")
+  deliver
 }
 reload() { [[ -n $dry ]] || P=$(jq -c . "$plan"); }
 
@@ -88,12 +95,23 @@ target_of() { # the item's integration branch, else the default branch
   else echo "$default_base"; fi
 }
 
-send() { # send <item-id> <text>: 0 once the worker has it (always, dry-run)
+send() { # send <item-id> <text>: queue the message; flush delivers it once the plan records it
   local ws t
   [[ -z $dry ]] || return 0
   ws=$(field "$1" .workspace); t=$(rowfield "$1" .agent.terminal); [[ -n $t ]] || t=$(field "$1" .terminal)
   [[ -n $ws && -n $t ]] || return 1
-  "$cli" terminals send --workspace "$ws" --local --terminal "$t" --text "$2" </dev/null >/dev/null 2>&1
+  jq -nc --arg ws "$ws" --arg t "$t" --arg text "$2" --arg id "$1" '{ws: $ws, t: $t, text: $text, id: $id}' >>"$scratch/sends"
+}
+
+deliver() { # send what the plan now records as sent
+  local m
+  [[ -s $scratch/sends ]] || return 0
+  while IFS= read -r m; do
+    "$cli" terminals send --workspace "$(jq -r .ws <<<"$m")" --local --terminal "$(jq -r .t <<<"$m")" \
+      --text "$(jq -r .text <<<"$m")" </dev/null >/dev/null 2>&1 ||
+      echo "cycle: could not deliver the follow-up to $(jq -r .id <<<"$m")" >&2
+  done <"$scratch/sends"
+  : >"$scratch/sends"
 }
 
 started() { [[ $1 == in-progress || $1 == accepting || $1 == in-review || $1 == feedback ]]; }
@@ -378,6 +396,7 @@ while IFS= read -r id; do
     v=$("$here/merge.sh" run "$plan" "$id" 2>/dev/null </dev/null); rc=$?
     if [[ $rc == 0 ]]; then
       upd "$id" '.state = "done" | .reason = null'; ev "$id" merged "merged $(field "$id" .pr) into $(target_of "$id")"
+      flush  # a merge cannot be undone: record it at once
     fi
   fi
   if [[ $rc == 3 ]]; then

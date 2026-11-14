@@ -1141,6 +1141,13 @@ touch "$FIX/no-panes-open"; rm -f "$FIX/panes.args"
 "$scripts/summary.sh" "$plan" --open >/dev/null
 expect_exit "summary: --open without panes open still succeeds" "$?" 0
 
+# Atomicity: a plan write that fails before anything is recorded sends and tags nothing.
+one in-progress "In Review" idle '{}' '{"maxParallel": 0}'
+jq '.items += [{id: "#9", state: "queued", pr: "not-a-url"}]' "$plan" >"$FIX/p.tmp" && mv "$FIX/p.tmp" "$plan"
+before=$(jq -S 'del(.heartbeat)' "$plan" | cksum); cyc
+expect_exit "atomic: a failed plan write exits 1" "$rc" 1
+expect "atomic: no follow-up sent, no tag moved, plan unchanged" "$(cat "$FIX/send.log" "$FIX/tags.log" 2>/dev/null)$(jq -S 'del(.heartbeat)' "$plan" | cksum)" "$before"
+
 # zsh too, when installed
 if command -v zsh >/dev/null; then
   dispatch_sandbox
