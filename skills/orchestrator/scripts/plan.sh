@@ -184,7 +184,7 @@ case ${1:-} in
     jq --arg now "$now" '.heartbeat = $now' "$plan" | put
     ;;
   *)
-    sed -n "2,28p" "$0"
+    sed -n "2,27p" "$0"
     exit 1
     ;;
 esac
