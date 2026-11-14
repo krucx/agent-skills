@@ -1316,6 +1316,34 @@ noise_sandbox; touch "$FIX/host-down"; WT=3 wt
 expect_exit "watch: an error exits 1" "$rc" 1
 expect "watch: an error says why" "$(tail -n 1 <<<"$out")" "error: "
 
+# usage.py: totals, tool kinds and --run pairing, from tiny synthetic transcripts
+if command -v python3 >/dev/null; then
+  sandbox
+  tl() { # tl <time> <output> <cache-read> <tool-use-json|none> [id]
+    jq -nc --arg t "$1" --argjson o "$2" --argjson c "$3" --arg id "${5:-x}" --arg u "$4" '{type: "assistant", timestamp: $t,
+      message: {id: $id, usage: {input_tokens: 5, output_tokens: $o, cache_read_input_tokens: $c, cache_creation_input_tokens: 100},
+      content: (if $u == "none" then [{type: "text", text: "hi"}] else [{type: "tool_use", id: $id, name: "Bash", input: {command: $u}}] end)}}'
+  }
+  proj="$root/projects"
+  orch="$proj/$(printf %s "$(cd "$root/repo" && pwd)" | sed 's#[/.]#-#g')"
+  mkdir -p "$orch" "$proj/-x-worktree-app-issue-7-thing"
+  { tl 2026-11-14T10:00:00Z 10 1000 'plan.sh heartbeat' a; tl 2026-11-14T10:01:00Z 20 3000 'cycle.sh p plan' b
+    tl 2026-11-14T10:02:00Z 30 2000 'jq . x | plan.sh write -' c; tl 2026-11-14T10:03:00Z 40 2000 'ls' d
+    tl 2026-11-14T10:04:00Z 50 2000 none e; } >"$orch/o.jsonl"
+  tl 2026-11-14T10:00:30Z 200 10000 'ls' w1 >"$proj/-x-worktree-app-issue-7-thing/w.jsonl"
+  tl 2026-11-14T10:05:30Z 300 20000 none w2 >>"$proj/-x-worktree-app-issue-7-thing/w.jsonl"
+  jq -n '{repo: "acme/app", runId: "R1", items: [{id: "#7", branch: "issue-7-thing"}]}' >"$HOME/.agents/orchestrator/acme-app.json"
+  out=$(python3 -I "$scripts/usage.py" "$orch/o.jsonl" 2>&1)
+  expect "usage: counts turns and output" "$(tail -n 1 <<<"$out" | awk '{print $2, $3, $4}')" "5 150 500"
+  expect "usage: reads peak context and duration" "$out" "4m00s"
+  out=$(python3 -I "$scripts/usage.py" --turns 2 "$orch/o.jsonl" 2>&1)
+  expect "usage: --turns cuts the transcript" "$(tail -n 1 <<<"$out" | awk '{print $2, $3}')" "2 30"
+  out=$(python3 -I "$scripts/usage.py" --run R1 --repo-dir "$root/repo" --projects-dir "$proj" --plans-dir "$HOME/.agents/orchestrator" 2>&1)
+  expect "usage: --run pairs a worker" "$out" "worker issue-7-thing"
+  expect "usage: --run prints the percentage" "$out" "orchestrator output: 150 of 500 worker output = 30.0%"
+  expect "usage: --run counts hand-written plan writes" "$out" "plan writes (jq ... | plan.sh write): 1"
+fi
+
 # zsh too, when installed
 if command -v zsh >/dev/null; then
   dispatch_sandbox
