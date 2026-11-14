@@ -216,6 +216,42 @@ jq '.items[0].pr = "https://github.com/acme/app/pull/388" | .integrations = [{id
 expect_exit "write: URL and null pass" $? 0
 expect "write: URL is stored" "$(jq -r '.items[0].pr' "$plan")" "https://github.com/acme/app/pull/388"
 
+# --- events log and criteria ------------------------------------------------------------------------
+sandbox
+plan_with "[$(item '#5' in-progress w5 t5)]" '{"owner": "me", "heartbeat": "2026-11-12T20:00:00Z"}'
+"$scripts/plan.sh" event '#5' dispatched "workspace w5" >/dev/null; expect_exit "event: appends" $? 0
+"$scripts/plan.sh" event null waiting "quiet" >/dev/null
+expect "event: entry fields" "$(jq -c '.events[0] | {item, action, detail}' "$plan")" '{"item":"#5","action":"dispatched","detail":"workspace w5"}'
+expect "event: null item" "$(jq -c '.events[1].item' "$plan")" null
+out=$("$scripts/plan.sh" event '#5' bogus x 2>&1); expect_exit "event: unknown action refused" $? 1
+expect "event: names the action" "$out" "bogus"
+expect "events: all, one line each" "$("$scripts/plan.sh" events | wc -l | tr -d ' ')" 2
+expect "events: --since filters" "$("$scripts/plan.sh" events --since 2999-01-01T00:00:00Z | wc -l | tr -d ' ')" 0
+expect "events: --since keeps later entries" "$("$scripts/plan.sh" events --since 2000-01-01T00:00:00Z | wc -l | tr -d ' ')" 2
+SUPERSET_TERMINAL_ID=other "$scripts/plan.sh" event '#5' blocked x >/dev/null 2>&1
+expect_exit "event: non-owner exits 3" $? 3
+jq '.events += [{at: "2026-11-12T20:00:00Z", item: "#5", action: "nope", detail: "x"}]' "$plan" >"$root/next.json"
+out=$("$scripts/plan.sh" write "$root/next.json" 2>&1); expect_exit "write: bad event rejected" $? 1
+expect "write: names the event index" "$out" "events[2]"
+jq '.events[0] |= del(.detail)' "$plan" >"$root/next.json"
+out=$("$scripts/plan.sh" write "$root/next.json" 2>&1); expect "write: missing field names index" "$out" "events[0]"
+for bad_c in '{"met":3,"total":2,"unmet":[]}' '{"met":1.5,"total":2,"unmet":[]}' '{"met":1,"total":2,"unmet":"x"}'; do
+  jq --argjson c "$bad_c" '.items[0].criteria = $c' "$plan" >"$root/next.json"
+  out=$("$scripts/plan.sh" write "$root/next.json" 2>&1); code=$?
+  expect_exit "write: criteria $bad_c rejected" $code 1
+  expect "write: names the item" "$out" "#5: criteria"
+done
+jq '.items[0].criteria = {met: 1, total: 2, unmet: ["b"]}' "$plan" >"$root/next.json"
+"$scripts/plan.sh" write "$root/next.json" >/dev/null 2>&1; expect_exit "write: valid criteria passes" $? 0
+jq '.items[0].criteria = null' "$plan" >"$root/next.json"
+"$scripts/plan.sh" write "$root/next.json" >/dev/null 2>&1; expect_exit "write: null criteria passes" $? 0
+"$scripts/plan.sh" close >/dev/null
+expect "close: appends closed event" "$(jq -r '.events[-1].action' "$plan")" closed
+sandbox
+plan_with "[$(item '#5' in-progress w5 t5)]" '{"owner": "orch-1", "heartbeat": "2026-01-01T00:00:00Z"}'
+"$scripts/plan.sh" claim --takeover --force >/dev/null
+expect "takeover: appends taken-over with previous owner" "$(jq -c '.events[-1] | {action, detail}' "$plan")" 'taken-over","detail":"taken over from orch-1'
+
 # --- ownership: live vs stale, and forced takeover (macOS and GNU date parsing) ----------------
 sandbox
 plan_with "[$(item '#6' in-progress w6 t6)]" "{\"owner\": \"orch-1\", \"heartbeat\": \"$(ago 2)\"}"
