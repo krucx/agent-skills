@@ -662,6 +662,85 @@ expect "rules: merge allowed is ok" "$("$scripts/merge.sh" rules feature/csv)" "
 echo '[{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":true}}]' >"$FIX/rules.json"
 expect "rules: up-to-date requirement is reported" "$("$scripts/merge.sh" rules feature/csv)" "strict:"
 
+# --- preflight: one call answers every question; each exit code only for its condition --------
+pf_sandbox() {
+  sandbox
+  "$scripts/groups.sh" p1 save '{}' >/dev/null   # a saved group map: nothing to ask
+}
+pf() { out=$("$scripts/preflight.sh" "$@" 2>/dev/null); pf_rc=$?; }
+
+pf_sandbox
+pf; rc=$pf_rc
+expect_exit "preflight: all well exits 0" "$rc" 0
+expect "preflight: tools" "$out" '"paradevVersion":"2.0.8"'
+expect "preflight: auth" "$(jq -c .auth <<<"$out")" '"gh":true'
+expect "preflight: host" "$(jq -c .host <<<"$out")" '"reachable":true'
+expect "preflight: repo and default branch" "$(jq -c .repo <<<"$out")" '"nameWithOwner":"acme/app","defaultBranch":"main"'
+expect "preflight: project" "$(jq -c .project <<<"$out")" '"id":"p1"'
+expect "preflight: plan claim is free" "$(jq -c .plan <<<"$out")" '"claim":"free"'
+expect "preflight: groups" "$(jq -c .groups <<<"$out")" '"In Progress"'
+expect "preflight: presets" "$(jq -c .presets.claude.auto[0].presetId <<<"$out")" 'claude-auto'
+
+echo '{"nameWithOwner":"acme/app","defaultBranchRef":{"name":"trunk"},"squashMergeAllowed":true,"mergeCommitAllowed":false,"rebaseMergeAllowed":false}' >"$FIX/repo.json"
+pf; expect "preflight: squash-only repo" "$(jq -c '.repo.mergeMethods' <<<"$out")" '["squash"]'
+
+pf_sandbox; touch "$FIX/signed-out"; pf; rc=$pf_rc
+expect_exit "preflight: signed out exits 1" "$rc" 1
+expect "preflight: signed out names the error, JSON complete" "$(jq -c '[.error, .repo.nameWithOwner]' <<<"$out")" 'not signed in'
+pf_sandbox; touch "$FIX/host-down"; pf
+expect_exit "preflight: host down exits 1" "$pf_rc" 1
+expect "preflight: host down reported" "$(jq -c .host <<<"$out")" '"reachable":false'
+pf_sandbox; touch "$FIX/no-repo"; pf
+expect_exit "preflight: not on GitHub exits 2" "$pf_rc" 2
+pf_sandbox; echo '[{"id":"p9","name":"other"}]' >"$FIX/projects.json"; pf
+expect_exit "preflight: no project exits 2" "$pf_rc" 2
+expect "preflight: candidates listed" "$(jq -c .project.candidates <<<"$out")" '"p9"'
+
+# plan ownership
+pf_sandbox; snapshot w1 t1 working other
+jq -n --arg beat "$(ago 1)" '{repo:"acme/app",runId:"r1",status:"active",owner:"other",heartbeat:$beat,items:[]}' >"$plan"
+pf; expect_exit "preflight: live owner exits 3" "$pf_rc" 3
+expect "preflight: live owner details" "$(jq -c .plan <<<"$out")" '"claim":"live-owner"'
+expect "preflight: close also stops on a live owner" "$(pf --mode close >/dev/null; echo $pf_rc)" 3
+pf_sandbox; snapshot w1 t1 working
+jq -n --arg beat "$(ago 120)" '{repo:"acme/app",runId:"r1",status:"active",owner:"gone",heartbeat:$beat,items:[]}' >"$plan"
+pf; expect_exit "preflight: stale owner on a run exits 4" "$pf_rc" 4
+expect "preflight: stale reported" "$(jq -c .plan.claim <<<"$out")" 'stale'
+pf --mode continue
+expect_exit "preflight: continue takes over a stale owner, exit 0" "$pf_rc" 0
+expect "preflight: takeover reported" "$(jq -c .plan <<<"$out")" '"takenOver":true'
+expect "preflight: plan now owned" "$(jq -r .owner "$plan")" me
+pf_sandbox; jq -n --arg beat "$(ago 1)" '{repo:"acme/app",runId:"r1",status:"active",owner:"other",heartbeat:$beat,items:[]}' >"$plan"
+snapshot w1 t1 working other
+pf --mode report
+expect_exit "preflight: report ignores a live owner, exit 0" "$pf_rc" 0
+expect "preflight: report uses plan check" "$(jq -c .plan.check <<<"$out")" 'other'
+expect "preflight: report never claims" "$(jq -r .owner "$plan")" other
+
+# groups
+pf_sandbox; rm -rf "$HOME/.agents/orchestrator/groups.json"; pf
+expect_exit "preflight: unsaved group map exits 5" "$pf_rc" 5
+expect "preflight: unsaved flagged with a suggestion" "$(jq -c .groups.unsaved <<<"$out")" true
+pf_sandbox; "$scripts/groups.sh" p1 save '{"In Progress":"wip"}' >/dev/null; pf
+expect_exit "preflight: a lost tag exits 5" "$pf_rc" 5
+expect "preflight: lost tag named" "$(jq -c .groups.lost <<<"$out")" '"In Progress":"wip"'
+
+# presets: auto by label, auto by args, regular that auto-approves
+pf_sandbox
+echo '[{"presetId":"codex","label":"Codex","command":"codex","args":[]}]' >"$FIX/agents.json"
+pf --harness codex; expect_exit "preflight: no auto instance exits 6" "$pf_rc" 6
+expect "preflight: regular listed" "$(jq -c .presets.codex.regular[0].presetId <<<"$out")" codex
+echo '[{"presetId":"claude","label":"Claude","command":"claude","args":[]},{"presetId":"claude-2","label":"Claude fast","command":"claude","args":["--permission-mode=auto"]}]' >"$FIX/agents.json"
+pf; expect_exit "preflight: auto by args exits 0" "$pf_rc" 0
+expect "preflight: classified auto by args" "$(jq -c .presets.claude.auto[0].by <<<"$out")" args
+echo '[{"presetId":"claude","label":"Claude","command":"claude","args":["--permission-mode","auto"]}]' >"$FIX/agents.json"
+pf
+expect "preflight: regular preset that auto-approves is flagged" "$(jq -c .presets.claude.regular[0].autoApproves <<<"$out")" true
+expect_exit "preflight: that regular preset is not an auto instance, exit 6" "$pf_rc" 6
+echo '[{"presetId":"claude","label":"Claude","command":"claude","args":[]},{"presetId":"claude-auto","label":"Claude (auto)","command":"claude","args":[]}]' >"$FIX/agents.json"
+pf; expect "preflight: auto by label" "$(jq -c .presets.claude.auto[0].by <<<"$out")" label
+expect_exit "preflight: report mode does not need an auto instance" "$(echo '[]' >"$FIX/agents.json"; pf --mode report >/dev/null; echo $pf_rc)" 0
+
 # zsh too, when installed
 if command -v zsh >/dev/null; then
   dispatch_sandbox

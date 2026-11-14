@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Test shim for the GitHub CLI: pr view answers $FIX/pr-view.json, pr merge records its args in
+# Test shim for the GitHub CLI: auth status fails when $FIX/gh-signed-out exists, repo view --json
+# answers $FIX/repo.json (or fails with $FIX/no-repo); pr view answers $FIX/pr-view.json, pr merge records its args in
 # $FIX/merge.args, api rules/branches answers $FIX/rules.json; pr list answers from $FIX/prs.json (default: no PRs), honouring
 # --head <branch> and --jq <expr> like the real one.
 set -euo pipefail
@@ -13,7 +14,12 @@ case "$1 ${2:-}" in
     if [[ -n $expr ]]; then jq -r "$expr" <<<"$out"; else echo "$out"; fi ;;
   "pr view") cat "$FIX/pr-view.json" ;;
   "pr merge") echo "$*" >"$FIX/merge.args" ;;
-  "repo view") echo acme/app ;;
+  "auth status") [[ ! -f $FIX/gh-signed-out ]] || { echo "You are not logged in" >&2; exit 1; } ;;
+  "repo view")
+    if [[ " $* " == *defaultBranchRef* ]]; then   # preflight: $FIX/repo.json, default a repo allowing every method
+      [[ ! -f $FIX/no-repo ]] || { echo "not a GitHub repository" >&2; exit 1; }
+      cat "$FIX/repo.json" 2>/dev/null || echo '{"nameWithOwner":"acme/app","defaultBranchRef":{"name":"main"},"squashMergeAllowed":true,"mergeCommitAllowed":true,"rebaseMergeAllowed":true}'
+    else echo acme/app; fi ;;
   "issue view") cat "$FIX/epic.json" ;;
   "api repos/acme/app/issues/"*"/sub_issues") cat "$FIX/sub-issues.json" ;;
   "api repos/acme/app/rules/branches/"*) cat "$FIX/rules.json" 2>/dev/null || echo '[]' ;;
