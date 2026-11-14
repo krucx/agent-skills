@@ -128,8 +128,9 @@ tag=$(jq -r '.groups["In Progress"] // empty' "$plan")
 tag=${tag:-In Progress}
 
 case $agent in
-  claude|hermes) first="/$skill $id" ;;
+  claude|hermes|agy|antigravity) first="/$skill $id" ;;
   codex) first="\$$skill $id" ;;
+  opencode) first="Use the $skill skill to do $id." ;;  # no skill slash command; verified in cli-surface.md
   *) first="Use the $skill skill to do $id." ;;
 esac
 others=$(jq -r --arg id "$id" '[.items[] | select(.id != $id) | .id] | join(", ")' "$plan")
