@@ -1,7 +1,7 @@
 # agent-skills
 
 Agent skills in the open [Agent Skills](https://agentskills.io/specification) format, usable
-from Claude Code, Codex, Gemini CLI, Hermes and any other harness that reads `SKILL.md`.
+from Claude Code, Codex, OpenCode, Antigravity, Gemini CLI, Hermes and any other harness that reads `SKILL.md`.
 
 | Skill | What it does |
 | --- | --- |
@@ -45,6 +45,8 @@ with `jq`, `gh` and `superset` (or `paradev`) on `PATH` there.
 | Claude Code | `/orchestrator 340-343, 345 onwards` or "orchestrate 340 to 343" |
 | Codex | `$orchestrator 340-343` |
 | Gemini CLI | "orchestrate issues 340 to 343" (Gemini picks the skill from your words) |
+| OpenCode | "use the orchestrator skill on issues 340 to 343" |
+| Antigravity | `/orchestrator 340-343` |
 | Hermes | `/orchestrator 340-343` |
 
 "orchestrator report back" prints the status table at any time, from any harness. It brings
@@ -84,10 +86,12 @@ desktop app, add an agent instance per harness that runs with auto-approve, for 
 | --- | --- |
 | Claude (auto) | `claude --permission-mode auto` |
 | Codex (auto) | `codex --approve-for-me` |
+| OpenCode (auto) | `opencode --auto` |
+| Antigravity (auto) | `agy --mode auto` |
 
 Gemini's default preset already runs with `--approval-mode=auto_edit`. The orchestrator treats
 an instance as auto when its name (`label`) contains `(auto)` or its command and args turn on
-auto-approve (`claude --permission-mode auto`, `codex --approve-for-me`). When it finds none, it
+auto-approve (`claude --permission-mode auto`, `codex --approve-for-me`, `opencode --auto`, `agy --mode auto`). When it finds none, it
 warns you and lists the instances it did find.
 
 What auto mode means:

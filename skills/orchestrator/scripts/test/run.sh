@@ -360,6 +360,16 @@ expect "dispatch: waiting is not blocked" "$args" "Waiting is not blocked"
 expect "dispatch: markers go on a line of their own" "$args" "the marker on a line of its own"
 expect_not "dispatch: output never echoes the prompt" "$out" "ORCHESTRATOR_WORKER_DONE"
 
+# first prompt line per harness
+for pair in 'opencode|Use the implement skill to do #20.' 'agy|/implement #20' 'antigravity|/implement #20' \
+  'codex|$implement #20' 'hermes|/implement #20' 'gemini|Use the implement skill to do #20.'; do
+  h=${pair%%|*} line=${pair#*|}
+  dispatch_sandbox
+  jq --arg a "$h" '.items[0].agent = $a' "$plan" >"$plan.tmp" && mv "$plan.tmp" "$plan"
+  dispatch >/dev/null 2>&1
+  expect "dispatch: $h first line" "$(sed -n 1,200p "$FIX/create.args")" $'--prompt\n'"$line"
+done
+
 # collision: remote branch, local branch, plan branch, and a PR each push the name to -2, -3, ...
 dispatch_sandbox
 git push -q origin HEAD:refs/heads/issue-20-add-csv-export-please
