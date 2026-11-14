@@ -30,6 +30,6 @@ Continue uses it for those items; `autoOnly` stays.
 ## No auto instance
 
 Regular preset; list each instance's `label`, `command`, `args`; offer once to create `Claude
-(auto)` (`claude --permission-mode auto`; Codex `codex --approve-for-me`; OpenCode `opencode
---auto`; Antigravity `agy --mode auto`). On yes only: via the CLI if `superset agents --help`
+(auto)` (`claude --permission-mode auto`; Codex `codex --approve-for-me`; OpenCode `opencode run
+--auto`; Antigravity `agy --mode auto` or `agy --dangerously-skip-permissions`). On yes only: via the CLI if `superset agents --help`
 offers it, else the user adds it in Paradev's agent settings.
