@@ -17,7 +17,7 @@
 #                                sign-in) in the last 20 lines, with no worker block; reason = it
 #                       stalled  Paradev says working, screen unchanged for STALL_MINUTES (15)
 #   worker            the last ORCHESTRATOR_WORKER_DONE/BLOCKED/WAITING block on screen as {marker,
-#                     item, pr, summary, checked, reason, needs, waitingOn, resumesWhen}, or null.
+#                     item, pr, summary, checked, criteria, reason, needs, waitingOn, resumesWhen}, or null.
 #                     marker "waiting" = a declared wait (busy, not done); a later DONE/BLOCKED
 #                     replaces it; still latest after WAIT_MINUTES (30) it adds "stale": true and
 #                     "staleMinutes", so the orchestrator checks the screen instead of skipping
@@ -131,13 +131,21 @@ worker_block() {
     line ~ /^ORCHESTRATOR_WORKER_(DONE|BLOCKED|WAITING)$/ { keep(); n = 0; key = ""; done = 0
       marker = line; sub(/^ORCHESTRATOR_WORKER_/, "", marker); marker = tolower(marker); delete v; next }
     marker == "" || done { next }
-    line ~ /^(item|pr|summary|checked|reason|needs|waiting-on|resumes-when):/ {
+    line ~ /^unmet:/ { key = "unmet"; v[key] = v[key] (key in v ? "\037" : "") substr(line, 8); next }
+    line ~ /^(item|pr|summary|checked|criteria|reason|needs|waiting-on|resumes-when):/ {
       key = substr(line, 1, index(line, ":") - 1); v[key] = substr(line, length(key) + 3); next }
     key != "" && (line == "" || line ~ /^(─|━|>|❯)/) { done = 1; next }
     key != "" { v[key] = v[key] " " line }
     END { keep(); if (bestmarker != "") { printf "marker\t%s\n", bestmarker; for (k in best) printf "%s\t%s\n", k, best[k] } }' |
     jq -Rsc 'split("\n") | map(select(length > 0) | split("\t") | {(.[0]): (.[1:] | join("\t"))}) | add
-      | if . then with_entries(.key |= ({"waiting-on": "waitingOn", "resumes-when": "resumesWhen"}[.] // .))
+      | if . then
+          ((.criteria // "") | capture("^(?<met>[0-9]+) */ *(?<total>[0-9]+)$")? // null) as $c
+          | (.unmet // "" | split("\u001f") | map(select(length > 0))) as $unmet
+          | del(.unmet)
+          | (if .marker == "done"
+             then .criteria = (if $c then {met: ($c.met | tonumber), total: ($c.total | tonumber), unmet: $unmet} else null end)
+             else del(.criteria) end)
+          | with_entries(.key |= ({"waiting-on": "waitingOn", "resumes-when": "resumesWhen"}[.] // .))
         else . end'
 }
 
@@ -203,6 +211,9 @@ if [[ -n $compact ]]; then
               + (if .worker.resumesWhen then ", until: \(.worker.resumesWhen)" else "" end)
               + (if .worker.stale then ", stale wait (\(.worker.staleMinutes) minutes)" else "" end)
               + (if .worker.checked then ", checked: \(.worker.checked)" else "" end)
+              + (if .worker.criteria then ", criteria \(.worker.criteria.met)/\(.worker.criteria.total)"
+                  + (if (.worker.criteria.unmet | length) > 0 then ", \(.worker.criteria.unmet | length) unmet" else "" end)
+                else "" end)
               + (if .worker.reason then ", reason: \(.worker.reason)" else "" end)] else [] end)
          | join(" | ")' <<<"$out"
 else

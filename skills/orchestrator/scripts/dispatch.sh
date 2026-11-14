@@ -196,10 +196,16 @@ others=$(jq -r --arg id "$id" '[.items[] | select(.id != $id) | .id] | join(", "
     "  by name. If the PR has no checks at all (common on PRs into a feature branch), run the" \
     "  project's test command locally and report it in \`checked:\`, e.g. \"no PR checks; local: npm" \
     "  test passed\"; the orchestrator merges a PR into an integration branch only on that." \
+    "- criteria: the issue's acceptance checklist (for free text, the ask, one criterion per sentence you can" \
+    "  check). Report <met>/<total>; when met < total add one indented \`unmet:\` line per criterion not" \
+    "  met or not verifiable. No checklist: report n/n over the criteria you derived and list them in" \
+    "  \`checked:\`. Omit the \`unmet:\` lines when all are met." \
     "- Finish your last message with exactly one of these, the marker on a line of its own:" \
     "  ORCHESTRATOR_WORKER_DONE" "  item: $id" "  pr: <url>" "  summary: <one line>" \
     "  checked: <what you verified against the task, and the PR's checks in a few words (\"5/5" \
-    "    green\"); name only the checks that were red or skipped>" "  or" \
+    "    green\"); name only the checks that were red or skipped>" \
+    "  criteria: <met>/<total>" \
+    "  unmet: <a criterion not met or not verifiable, quoted, and why in a few words>" "  or" \
     "  ORCHESTRATOR_WORKER_BLOCKED" "  item: $id" "  reason: <what stops you>" \
     "  needs: <the decision or access required>"
 } >"$tmp/prompt"
