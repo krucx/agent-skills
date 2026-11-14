@@ -54,7 +54,8 @@ scripts inside the repo. Never write jq against the plan: only `plan.sh write` c
   beyond the ask → `extras`. Show each task with its `ask` quoted; wait for the go. After it, offer
   once, separately, to file the tasks (ask verbatim, notes under their own heading); only on yes.
 - `feature #400` (epic) and `feature: <text>`: all items go to one integration branch:
-  [integrations](references/integrations.md) (also chains, the merge gate, finishing, `held`).
+  [integrations](references/integrations.md) (also chains, the **local** branch option, the merge
+  gate, finishing, `held`).
 - **Dependencies**: explicit ("blocked by", "after", parent/child) and clear conflicts (same
   files, migration, schema; smaller first). Outside the run: closed-as-completed is met; open or
   skipped → the dependent `waiting`, naming it. **Interface hint**: if a chain's link looks large,
@@ -69,7 +70,11 @@ Dispatch at once unless the run has an integration, a dependency chain, an auto-
 regular-preset items; then wait for the go. Ask **once, everything at once, never later**:
 where independent items go (`main` or `feature/<slug>`), each chain (`chains.sh offer`; accept
 with `chains.sh accept`; none offered if the independent items share a feature branch:
-`chains.sh share`), the auto-only question, and which items run on the regular preset.
+`chains.sh share`), for each integration branch whether it is **local** (no sub-PRs and no CI per
+item: workers test before every commit, `merge.sh` merges in this clone, CI runs once on the final
+PR; `--local` on `chains.sh accept|share` and `epic.sh import`, `"local": true` in the plan for
+`feature: <text>`) or on GitHub (the default), the auto-only question, and which items run on the
+regular preset.
 Per-item moves ("#344 straight to main") are applied and the table shown again. Ask instead on a
 dependency cycle or two items that might be one PR. Dispatch is `dispatch.sh`, never by hand.
 Auto and regular presets, auto-only: [approval](references/approval.md).

@@ -8,7 +8,9 @@
 #       `accept` needs): item and PR; the criteria (the issue's checklist, or the `ask`); the worker's
 #       criteria and `checked`; the PR's files with additions/deletions, grouped by top-level
 #       directory over --group-over files (default 15); the diff itself only when the PR changes
-#       fewer than --diff-under lines (default 150), cut to fit --max-chars (default 1000).
+#       fewer than --diff-under lines (default 150), cut to fit --max-chars (default 1000). An item
+#       on a local integration branch has no PR: its files and diff come from `git diff` against
+#       that branch.
 #   accept.sh verdict <plan-file> <ID> ok|gap "<text>"
 #       ok: acceptance "ok", state in-review, tag moved, in-review event.
 #       gap: acceptance = <text>, state feedback (reason "acceptance follow-up"), the follow-up sent
@@ -27,6 +29,10 @@ plan=${1:-}; shift || usage
 [[ -f $plan ]] || die "no plan file $plan"
 P=$(jq -c . "$plan") || die "unreadable plan"
 item() { jq -c --arg id "$1" '[.items[] | select(.id == $id)][0] // empty' <<<"$P"; }
+local_target() { # local_target <ID>: the item's integration branch when that integration is local, else nothing
+  jq -r --arg id "$1" '(.items[] | select(.id == $id) | .integration) as $i
+    | [.integrations[]? | select(.id == $i and (.local // false))][0].branch // empty' <<<"$P"
+}
 cut_to() { # cut_to <n> [<marker>]: stdin cut to n characters, marked when cut
   local s; s=$(cat)
   if ((${#s} > $1)); then printf '%s%s' "${s:0:$1}" "${2:-…}"; else printf '%s' "$s"; fi
@@ -81,6 +87,26 @@ packet() {
         else out+="diff: unavailable or no room ($lines lines changed)"$'\n'; fi
       else
         out+="diff: omitted ($lines lines changed; names only)"$'\n'
+      fi
+    elif tb=$(local_target "$id") && [[ -n $tb ]]; then
+      wb=$(jq -r '.branch // empty' <<<"$it")
+      stat=''; [[ -z $wb ]] || stat=$(git diff --numstat "$tb...$wb" 2>/dev/null || true)
+      if [[ -z $stat ]]; then
+        out+="files: none (local branch ${wb:-?} has no changes against $tb, or is not in this clone)"$'\n'
+      else
+        read -r num adds dels < <(awk '{ n++; a += ($1 == "-" ? 0 : $1); d += ($2 == "-" ? 0 : $2) } END { print n + 0, a + 0, d + 0 }' <<<"$stat")
+        lines=$((adds + dels))
+        out+="files: $num, +$adds -$dels (local branch $wb vs $tb, no PR)"$'\n'
+        out+=$(awk '{ printf "%s%s +%s -%s", (NR > 1 ? "; " : ""), $3, $1, $2 }' <<<"$stat" | cut_to 300)$'\n'
+        if ((lines < diff_under)); then
+          diff=$(git diff "$tb...$wb" 2>/dev/null || true)
+          room=$((budget - ${#out} - 20))
+          if ((room > 0)) && [[ -n $diff ]]; then
+            out+="diff:"$'\n'"$(printf '%s' "$diff" | cut_to "$room" $'\n[diff cut]')"$'\n'
+          else out+="diff: unavailable or no room ($lines lines changed)"$'\n'; fi
+        else
+          out+="diff: omitted ($lines lines changed; names only)"$'\n'
+        fi
       fi
     fi
     printf '%s\n' "$(printf '%s' "$out" | cut_to "$budget")"

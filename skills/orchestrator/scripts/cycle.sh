@@ -97,6 +97,21 @@ target_of() { # the item's integration branch, else the default branch
   else echo "$default_base"; fi
 }
 
+local_integ() { # local_integ <item-id>: the item's integration is a local branch (no sub-PRs)
+  local integ; integ=$(field "$1" .integration); [[ -n $integ ]] || return 1
+  [[ $(jq -r --arg i "$integ" '[.integrations[]? | select(.id == $i) | .local // false][0]' <<<"$P") == true ]]
+}
+
+finish_msg() { # the follow-up for an idle worker with no PR and no DONE
+  if local_integ "$1"; then echo "Please finish: commit on your branch (no PR: $(target_of "$1") is a local integration branch), then print your ORCHESTRATOR_WORKER_DONE block."
+  else echo "Please finish: commit, push and open the PR (gh pr create --base $(target_of "$1")), then print your ORCHESTRATOR_WORKER_DONE block."; fi
+}
+
+local_test_msg() { # the follow-up when `checked` shows no passing test run
+  if local_integ "$1"; then echo "Run the project's full test command and report it in \`checked:\` as \"local: <command> passed\" ($(target_of "$1") is a local integration branch; there are no PR checks); then print your ORCHESTRATOR_WORKER_DONE block again."
+  else echo "Run the project's tests locally (the PR has no checks) and report the result in \`checked:\`; then print your ORCHESTRATOR_WORKER_DONE block again."; fi
+}
+
 send() { # send <item-id> <text>: queue the message; flush delivers it once the plan records it
   local ws t
   [[ -z $dry ]] || return 0
@@ -292,7 +307,7 @@ transition() {
       elif [[ $reason == "follow-up sent" ]]; then
         upd "$id" '.state = "blocked" | .reason = "no PR after the follow-up"'
         ev "$id" blocked "idle with no PR after one follow-up"; need blocked "$id" "idle with no PR after one follow-up"
-      elif send "$id" "Please finish: commit, push and open the PR (gh pr create --base $(target_of "$id")), then print your ORCHESTRATOR_WORKER_DONE block."; then
+      elif send "$id" "$(finish_msg "$id")"; then
         upd "$id" '.reason = "follow-up sent"'
         ev "$id" follow-up-sent "idle with no PR: asked it to finish and open the PR"
       fi ;;
@@ -376,12 +391,16 @@ while IFS= read -r f; do
   [[ -n $f ]] || continue
   [[ -z $(jq -r --arg f "$f" '[.integrations[] | select(.id == $f) | .mergeNote][0] // empty' <<<"$P") ]] || continue
   branch=$(jq -r --arg f "$f" '[.integrations[] | select(.id == $f) | .branch][0]' <<<"$P")
-  rules=$("$here/merge.sh" rules "$branch" 2>/dev/null </dev/null)
-  note=ok
-  case $rules in
-    *no-merge-commit*|*unknown*) note=human ;;
-    *strict*) note=strict ;;
-  esac
+  if [[ $(jq -r --arg f "$f" '[.integrations[] | select(.id == $f) | .local // false][0]' <<<"$P") == true ]]; then
+    note=local rules="local branch: no sub-PRs and no rulesets; merge.sh merges worker branches in this clone"
+  else
+    rules=$("$here/merge.sh" rules "$branch" 2>/dev/null </dev/null)
+    note=ok
+    case $rules in
+      *no-merge-commit*|*unknown*) note=human ;;
+      *strict*) note=strict ;;
+    esac
+  fi
   P=$(jq -c --arg f "$f" --arg n "$note" '(.integrations[] | select(.id == $f)) |= (.mergeNote = $n)' <<<"$P")
   ev "$f" rules "$branch: $note ($(printf '%s' "$rules" | head -n 1 | cut -c1-120))"
 done < <(jq -r '[.items[] | select(.state == "in-review" and .integration != null) | .integration] | unique[]' <<<"$P")
@@ -390,19 +409,20 @@ flush
 while IFS= read -r id; do
   [[ -n $id ]] || continue
   [[ $(field "$id" .state) == in-review ]] || continue
+  src=$(field "$id" .pr); [[ -n $src ]] || src="branch $(field "$id" .branch)"  # a local integration has no PR
   if [[ -n $dry ]]; then
     v=$("$here/merge.sh" check "$plan" "$id" 2>/dev/null </dev/null); rc=$?
-    [[ $rc == 0 ]] && ev "$id" merged "would merge $(field "$id" .pr) (dry run)"
+    [[ $rc == 0 ]] && ev "$id" merged "would merge $src (dry run)"
   else
     v=$("$here/merge.sh" run "$plan" "$id" 2>/dev/null </dev/null); rc=$?
     if [[ $rc == 0 ]]; then
-      upd "$id" '.state = "done" | .reason = null'; ev "$id" merged "merged $(field "$id" .pr) into $(target_of "$id")"
+      upd "$id" '.state = "done" | .reason = null'; ev "$id" merged "merged $src into $(target_of "$id")"
       flush  # a merge cannot be undone: record it at once
     fi
   fi
   if [[ $rc == 3 ]]; then
     gap=${v#followup: }
-    if [[ $(field "$id" .acceptance) != "$gap" ]] && send "$id" "Run the project's tests locally (the PR has no checks) and report the result in \`checked:\`; then print your ORCHESTRATOR_WORKER_DONE block again."; then
+    if [[ $(field "$id" .acceptance) != "$gap" ]] && send "$id" "$(local_test_msg "$id")"; then
       upd "$id" '.state = "feedback" | .reason = "acceptance follow-up" | .acceptance = $g' --arg g "$gap"
       ev "$id" acceptance-gap "$gap"; ev "$id" follow-up-sent "asked for a local test run"
     fi

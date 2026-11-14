@@ -1240,6 +1240,113 @@ acc_plan; setplan '.items[0].terminal = null'
 err=$("$scripts/accept.sh" verdict "$plan" '#1' gap "gap" 2>&1); rc=$?
 expect "verdict gap: a missing terminal is an error and the plan is unchanged" "$rc:$err:$(pf .state)" "1:send: #1 has no terminal in the plan:accepting"
 
+# --- local integration branch: no sub-PRs, merged in this clone ---------------------------------
+local_integ='{"integrations": [{"id": "F1", "title": "CSV", "branch": "feature/csv", "base": "main", "pr": null, "state": "open", "local": true}]}'
+# dispatch: the branch is created here from its base, never on origin; the worker opens no PR
+dispatch_sandbox
+git push -q origin HEAD:refs/heads/main
+plan_with "[$(jq -nc '{id: "#20", title: "Add CSV export", state: "queued", integration: "F1", skill: "implement", agent: "claude"}')]" "$local_integ"
+out=$(dispatch 2>&1)
+expect "local dispatch: dispatches" "$out" "dispatched #20 -> issue-20-add-csv-export "
+expect "local dispatch: the integration branch is in this clone" "$(git show-ref --verify --quiet refs/heads/feature/csv && echo yes)" yes
+expect "local dispatch: and not on origin" "$(git ls-remote --heads origin feature/csv)" ""
+args=$(cat "$FIX/create.args")
+expect "local dispatch: starts from the local branch" "$args" $'--base-branch\nfeature/csv'
+expect "local dispatch: the worker opens no PR" "$args" "open no PR and push nothing"
+expect "local dispatch: tests before each commit" "$args" "Before every commit run the test suites"
+expect "local dispatch: DONE names the local run" "$args" "pr: none (local integration)"
+expect_not "local dispatch: no PR check instructions" "$args" "gh pr checks"
+expect "local dispatch: still ends in a DONE block" "$args" "ORCHESTRATOR_WORKER_DONE"
+# a GitHub-side item waits for every check, quietly
+dispatch_sandbox; dispatch >/dev/null 2>&1; args=$(cat "$FIX/create.args")
+expect "dispatch: DONE waits for every check" "$args" "ORCHESTRATOR_WORKER_DONE while a check is pending or red"
+expect "dispatch: checks are watched quietly" "$args" '--watch --fail-fast >/dev/null 2>&1; echo exit=$?'
+expect "dispatch: only failed checks are listed" "$args" "--json name,state,bucket"
+expect "dispatch: an open PR is still the goal" "$args" "Your goal is an open PR"
+# the integrate worker of a local integration pushes the branch and lists the tasks
+dispatch_sandbox
+git push -q origin HEAD:refs/heads/main
+plan_with "[$(jq -nc '{id: "#1", title: "One", state: "done", integration: "F1", branch: "b-1", pr: null, skill: "implement", agent: "claude"}')]" "$local_integ"
+git branch -q feature/csv
+"$scripts/integrate.sh" add "$plan" F1 >/dev/null
+out=$("$scripts/dispatch.sh" proj "$plan" F1-integrate 2>&1)
+expect "local integrate: dispatches" "$out" "dispatched F1-integrate -> f1-integrate-integrate-csv "
+args=$(cat "$FIX/create.args")
+expect "local integrate: names the merged branches" "$args" "already merged into it in this clone"
+expect "local integrate: lists the task" "$args" "#1 One"
+expect "local integrate: pushes the branch" "$args" "git push origin HEAD:feature/csv"
+expect "local integrate: opens feature to main" "$args" "gh pr create --base main --head feature/csv"
+
+# merge.sh: an accepted branch with a passing local run merges into the local branch, never via gh
+local_sandbox() { # local_sandbox <checked>: feature/csv from main; b-30 adds f; #30 in review on F1 (local)
+  dispatch_sandbox
+  git branch -q feature/csv
+  git checkout -q -b b-30 && echo one >f && git add f && git commit -q -m one
+  plan_with "[$(jq -nc --arg c "$1" '{id: "#30", state: "in-review", integration: "F1", branch: "b-30", pr: null, checked: $c, acceptance: "ok", workspace: "w30", terminal: "t30"}')]" \
+    "$(jq -c '. + {maxParallel: 0}' <<<"$local_integ")"
+}
+local_sandbox "local: npm test passed"
+expect "local gate: a passing local run merges" "$(gate)" "merge"
+expect "local gate run: merges the branch into the integration branch" "$(gate run)" "merged b-30 into feature/csv"
+expect "local gate run: the integration branch has the commit" "$(git merge-base --is-ancestor b-30 feature/csv && echo yes)" yes
+expect "local gate run: with a merge commit" "$(git rev-list --merges --count feature/csv)" 1
+expect "local gate run: never gh pr merge" "$(cat "$FIX/merge.args" 2>/dev/null)" ""
+expect "local gate run: the temporary worktree is gone" "$(git worktree list | wc -l | tr -d ' ')" 1
+local_sandbox "tests pass"
+expect "local gate: a run not marked local gets a follow-up" "$(gate)" "followup:"
+expect_exit "local gate: follow-up exits 3" "$(gate >/dev/null; echo $?)" 3
+local_sandbox "local: npm test failed"
+expect "local gate: a failing local run gets a follow-up" "$(gate)" "followup:"
+local_sandbox "local: npm test passed"; jq '.items[0].branch = "b-missing"' "$plan" >"$plan.t" && mv "$plan.t" "$plan"
+expect "local gate: a branch not in this clone waits" "$(gate)" "wait: branch b-missing is not in this clone"
+local_sandbox "local: npm test passed"
+git checkout -q feature/csv && echo two >f && git add f && git commit -q -m two && git checkout -q b-30
+expect "local gate run: a conflict waits" "$(gate run)" "wait: b-30 conflicts with feature/csv"
+expect "local gate run: and leaves the integration branch alone" "$(git log -1 --format=%s feature/csv)" two
+expect "local gate run: a conflict cleans the worktree up" "$(git worktree list | wc -l | tr -d ' ')" 1
+
+# cycle.sh: a local integration reads no rules, notes "local", merges and records the branch
+merge_sandbox "local: npm test passed" "$(jq -c '. + {maxParallel: 0}' <<<"$local_integ")"
+jq '.items[0].pr = null' "$plan" >"$plan.t" && mv "$plan.t" "$plan"
+git branch -q feature/csv; git checkout -q -b 'b-#30' && echo one >f && git add f && git commit -q -m one
+echo '[]' >"$FIX/prs.json"; echo '[{"type":"required_linear_history"}]' >"$FIX/rules.json"
+cyc
+expect "cycle local: mergeNote is local, rules unread" "$(jq -r '.integrations[0].mergeNote' "$plan")" local
+expect "cycle local: the branch merges and the item is done" "$(pf .state '#30') $(evs)" "done F1:rules #30:merged"
+expect "cycle local: the merged event names the branch" "$(jq -r '.events[] | select(.action == "merged") | .detail' "$plan")" "merged branch b-#30 into feature/csv"
+expect "cycle local: never gh pr merge" "$(cat "$FIX/merge.args" 2>/dev/null)" ""
+# an idle local worker with no PR and no DONE is asked to commit, not to open a PR
+one in-progress "In Progress" idle '{"integration": "F1"}' "$(jq -c '. + {maxParallel: 0}' <<<"$local_integ")"
+echo '[]' >"$FIX/prs.json"; printf 'done I think\n' >"$FIX/screens/t1"; cyc
+expect "cycle local: the finish follow-up asks for a commit, no PR" "$(cat "$FIX/send.log")" "commit on your branch (no PR: feature/csv is a local integration branch)"
+
+# accept.sh packet: a local item's files and diff come from git
+acc_plan '{"pr": null, "integration": "F1"}'
+setplan ".integrations = $(jq -c .integrations <<<"$local_integ")"
+git branch -q feature/csv; git checkout -q -b 'b-#1' && printf 'x\n' >g && git add g && git commit -q -m g
+pk=$("$scripts/accept.sh" packet "$plan")
+expect "local packet: files from git" "$pk" "files: 1, +1 -0 (local branch b-#1 vs feature/csv, no PR)"
+expect "local packet: the file" "$pk" "g +1 -0"
+expect "local packet: the diff" "$pk" "+x"
+
+# chains and epics take --local
+sandbox
+plan_with "[$(chain_item '#340' 'Cache Pester'), $(chain_item '#341' 'Split backup' '["#340"]'), $(chain_item '#350' 'Lone')]"
+"$scripts/chains.sh" accept "$plan" --local '#341' >/dev/null
+expect "chains: accept --local marks the integration local" "$(jq -c '.integrations[0] | [.id, .local]' "$plan")" '["F1",true]'
+"$scripts/chains.sh" share "$plan" csv >/dev/null
+expect "chains: without --local there is no local field" "$(jq -c '.integrations[1] | has("local")' "$plan")" false
+sandbox
+plan_with "[$(chain_item '#350' 'Lone')]"
+"$scripts/chains.sh" share "$plan" csv --local >/dev/null
+expect "chains: share --local marks the integration local" "$(jq -c '.integrations[0].local' "$plan")" true
+sandbox
+echo '{"number":400,"title":"CSV Export","url":"https://github.com/acme/app/issues/400"}' >"$FIX/epic.json"
+echo '[{"number":401,"title":"Add button","state":"open","labels":[]}]' >"$FIX/sub-issues.json"
+plan_with "[]"
+"$scripts/epic.sh" import "$plan" 400 --local >/dev/null
+expect "epic: import --local marks the integration local" "$(jq -c '.integrations[0].local' "$plan")" true
+
 # --- wait-change noise filter + watch.sh -------------------------------------------------------
 noise_sandbox() { # #1 in-review idle, #2 in-progress working; events carry #2's dispatch <age> seconds ago
   dispatch_sandbox

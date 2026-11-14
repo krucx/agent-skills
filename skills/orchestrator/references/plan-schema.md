@@ -21,7 +21,8 @@
   `branch`: `feature/<slug>`; `base`: always the repo's default branch (integrations never nest);
   `pr`: the PR that lands it on `base`, once opened; `state`: `open`|`merged`; `mergeNote`
   (optional): `"human"` when its rulesets forbid merge commits (the orchestrator then leaves the
-  sub-PR merges to humans), `"strict"` once the up-to-date requirement was reported, `"ok"` when `cycle.sh` read its rules and found none in the way. Item `integration`:
+  sub-PR merges to humans), `"strict"` once the up-to-date requirement was reported, `"ok"` when `cycle.sh` read its rules and found none in the way, `"local"` for a local branch (no rules read).
+  `local` (optional): `true` when the branch lives in this clone only until its final PR: no sub-PRs, no CI per item, `merge.sh` merges accepted worker branches locally ([integrations](integrations.md), "Local integration branch"). Item `integration`:
   an integration's `id`, `dropped` (optional, with state `skipped`): the user dropped it so its
   integration can finish; `epic` (optional): `{id, title, url}` of the parent issue an epic run imported; the final PR links it; `integrates`: on the synthetic `<F>-integrate` item `integrate.sh add`
   creates (no `integration`; targets the default branch, starts on integration `<F>`'s branch), or `null`/absent for an item targeting the default branch. An item's

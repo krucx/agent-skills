@@ -22,6 +22,30 @@ Integrations are **never nested**: an integration's `base` is the default branch
   <plan-file> <slug>` puts the whole run on one `feature/<runId-slug>`.
 - The user may move single items ("#344 straight to main": `integration` null).
 
+## Local integration branch (opt-in at the go)
+
+Ask once in the go message, per integration: on GitHub (the default: the branch is pushed, every
+item opens a sub-PR into it, CI runs on each) or **local** (`local: true`): the branch lives in
+this clone only until its final PR, so there are no sub-PRs and no CI per item; faster, and CI
+runs once on the feature → default PR. Set it with `chains.sh accept <plan-file> --local <ID>`,
+`chains.sh share <plan-file> <slug> --local`, `epic.sh import <plan-file> <n> --local`, or
+`"local": true` on the integration you write for `feature: <text>`. What changes, all in scripts:
+
+- `dispatch.sh` creates the branch in this clone from its base (never pushes it) and tells the
+  worker: open no PR and push nothing, run the test suites that cover the change before every
+  commit and the full test command before the last one, and report `pr: none (local integration)`
+  with `checked: local: <command> passed`.
+- `accept.sh packet` takes the files and diff from `git diff <branch>...<worker branch>`.
+- `cycle.sh` records `mergeNote` `"local"` (no rulesets to read); `merge.sh` merges an accepted
+  branch whose `checked` reports a passing local run into the integration branch with a merge
+  commit, in a temporary worktree. A conflict is a `wait`, as for a conflicting PR, for the worker
+  to resolve; no passing local run is one follow-up asking for it.
+- The `<F>-integrate` worker pushes the branch for the first time and opens the final PR as
+  usual; its CI is the run's only CI.
+
+Workers must be on this machine's host (the branches live in this clone): never pair a local
+integration with cloud workspaces.
+
 ## Merge gate (script-enforced)
 
 `cycle.sh` runs `merge.sh` for green sub-PRs into an integration branch; humans merge everything
