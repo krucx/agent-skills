@@ -127,8 +127,10 @@ The scripts have a test suite that runs against fake `superset` and `gh` command
 Paradev host or GitHub access:
 
 ```bash
-bash skills/orchestrator/scripts/test/run.sh
+bash test.sh
 ```
+
+It runs every `skills/*/scripts/test/run.sh` and exits non-zero if any suite fails.
 
 ### Requirements
 
