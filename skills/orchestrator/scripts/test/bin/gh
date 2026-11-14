@@ -12,7 +12,8 @@ case "$1 ${2:-}" in
     [[ -z $head ]] || out=$(jq -c --arg h "$head" 'map(select(.headRefName == $h))' <<<"$out")
     expr=$(arg --jq "$@")
     if [[ -n $expr ]]; then jq -r "$expr" <<<"$out"; else echo "$out"; fi ;;
-  "pr view") cat "$FIX/pr-view.json" ;;
+  "pr view") if [[ " $* " == *" --json files "* ]]; then cat "$FIX/pr-files.json"; else cat "$FIX/pr-view.json"; fi ;;
+  "pr diff") cat "$FIX/pr.diff" ;;
   "pr merge") echo "$*" >"$FIX/merge.args" ;;
   "auth status") [[ ! -f $FIX/gh-signed-out ]] || { echo "You are not logged in" >&2; exit 1; } ;;
   "repo view")
@@ -20,7 +21,7 @@ case "$1 ${2:-}" in
       [[ ! -f $FIX/no-repo ]] || { echo "not a GitHub repository" >&2; exit 1; }
       cat "$FIX/repo.json" 2>/dev/null || echo '{"nameWithOwner":"acme/app","defaultBranchRef":{"name":"main"},"squashMergeAllowed":true,"mergeCommitAllowed":true,"rebaseMergeAllowed":true}'
     else echo acme/app; fi ;;
-  "issue view") cat "$FIX/epic.json" ;;
+  "issue view") cat "$FIX/issue-$3.json" 2>/dev/null || cat "$FIX/epic.json" ;;
   "api repos/acme/app/issues/"*"/sub_issues") cat "$FIX/sub-issues.json" ;;
   "api repos/acme/app/rules/branches/"*) cat "$FIX/rules.json" 2>/dev/null || echo '[]' ;;
   *) echo "gh shim: unsupported: $*" >&2; exit 1 ;;
