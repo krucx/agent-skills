@@ -36,6 +36,8 @@ me=${SUPERSET_TERMINAL_ID:-unknown}
 # superset, paradev and pdev are the same Paradev CLI; use whichever is installed.
 cli=$(command -v superset || command -v paradev || command -v pdev || true)
 now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+run_id_from_now=$(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$now" +%Y%m%d-%H%M 2>/dev/null ||
+  date -u -d "$now" +%Y%m%d-%H%M)
 # The fixed list of event actions; keep in step with references/plan-schema.md.
 actions='["dispatched","pr-opened","in-review","merged","pr-merged","tag-moved","follow-up-sent","acceptance-gap","blocked","waiting","skipped","taken-over","finished","closed","reconciled","stalled","accepting","held","queued","feedback","rules"]'
 
@@ -156,7 +158,19 @@ case ${1:-} in
                               and .met <= .total and (.unmet | type) == "array") | not))
        | "\(.id): criteria needs integer met <= total and an unmet array, got \(.criteria | tojson)")' "$2")
     [[ -z "$badev" ]] || { echo "$badev" >&2; exit 1; }
-    jq --arg me "$me" --arg now "$now" '.owner = $me | .heartbeat = $now' "$2" | put
+    # The first write owns the run identity. Ignore model-authored values; subsequent writes
+    # preserve the original identity even if their input JSON tries to change it.
+    if [[ -f "$plan" ]]; then
+      run_id=$(jq -r '.runId // empty' "$plan")
+      started_at=$(jq -r '.startedAt // empty' "$plan")
+      [[ -n "$run_id" ]] || run_id=$run_id_from_now
+      [[ -n "$started_at" ]] || started_at=$now
+    else
+      run_id=$run_id_from_now
+      started_at=$now
+    fi
+    jq --arg me "$me" --arg now "$now" --arg run_id "$run_id" --arg started_at "$started_at" \
+      '.runId = $run_id | .startedAt = $started_at | .owner = $me | .heartbeat = $now' "$2" | put
     ;;
   event)
     [[ $# -eq 4 ]] || { echo 'usage: plan.sh event <item> <action> "<detail>"' >&2; exit 1; }

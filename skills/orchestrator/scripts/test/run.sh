@@ -26,7 +26,7 @@ ago() {
 
 # A fresh HOME, fixtures dir and git repo per test.
 sandbox() {
-  root=$(mktemp -d "${TMPDIR:-/tmp}/orch-test.XXXXXX")
+  root=$(mktemp -d "${TMPDIR:-/tmp}/issue-73-orchestrator-derive-runid-from.XXXXXX")
   export HOME="$root/home" FIX="$root/fix" SUPERSET_TERMINAL_ID=me
   mkdir -p "$HOME" "$FIX/screens" "$root/repo"
   cd "$root/repo" && git init -q && git remote add origin https://github.com/acme/app.git
@@ -62,6 +62,30 @@ ws() { # ws <id> <branch> <tag>
 }
 
 status() { "$scripts/status.sh" "$@" proj "$plan"; }
+
+# --- plan creation: runId comes from one captured start time, not the model --------------------
+sandbox
+jq -n '{repo: "acme/app", runId: "1200", status: "active", items: []}' >"$root/next.json"
+"$scripts/plan.sh" write "$root/next.json" >/dev/null
+started_at=$(jq -r .startedAt "$plan")
+expected_run_id=$(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$started_at" +%Y%m%d-%H%M 2>/dev/null ||
+  date -u -d "$started_at" +%Y%m%d-%H%M)
+expect_not "plan creation: records a UTC start timestamp" "$started_at" "null"
+expect "plan creation: runId is derived from startedAt" "$(jq -r .runId "$plan")" "$expected_run_id"
+expect_not "plan creation: caller runId ignored" "$(jq -r .runId "$plan")" "1200"
+run_id=$(jq -r .runId "$plan")
+started_at=$(jq -r .startedAt "$plan")
+jq '.runId = "model-override"' "$plan" >"$root/next.json"
+"$scripts/plan.sh" write "$root/next.json" >/dev/null
+expect "plan update: runId preserved against override" "$(jq -r .runId "$plan")" "$run_id"
+expect "plan update: startedAt preserved" "$(jq -r .startedAt "$plan")" "$started_at"
+
+# --- existing plan identity survives resume and takeover ---------------------------------------
+sandbox
+plan_with '[]' '{"startedAt":"2026-11-12T20:15:03Z","runId":"20261112-2015","owner":"me"}'
+"$scripts/plan.sh" claim >/dev/null
+expect "resume: preserves runId" "$(jq -r .runId "$plan")" "20261112-2015"
+expect "resume: preserves startedAt" "$(jq -r .startedAt "$plan")" "2026-11-12T20:15:03Z"
 
 # --- stalled agent: same screen for STALL_MINUTES while Paradev says working -----------------
 sandbox
@@ -283,6 +307,7 @@ sandbox
 plan_with "[$(item '#5' in-progress w5 t5)]" '{"owner": "orch-1", "heartbeat": "2026-01-01T00:00:00Z"}'
 "$scripts/plan.sh" claim --takeover --force >/dev/null
 expect "takeover: appends taken-over with previous owner" "$(jq -c '.events[-1] | {action, detail}' "$plan")" 'taken-over","detail":"taken over from orch-1'
+expect "takeover: preserves runId" "$(jq -r .runId "$plan")" "20261112-1200"
 
 # --- ownership: live vs stale, and forced takeover (macOS and GNU date parsing) ----------------
 sandbox
