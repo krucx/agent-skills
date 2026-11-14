@@ -26,7 +26,7 @@ ago() {
 
 # A fresh HOME, fixtures dir and git repo per test.
 sandbox() {
-  root=$(mktemp -d "${TMPDIR:-/tmp}/orch-test.XXXXXX")
+  root=$(mktemp -d "${TMPDIR:-/tmp}/issue-72-orchestrator-detect-opencode-and.XXXXXX")
   export HOME="$root/home" FIX="$root/fix" SUPERSET_TERMINAL_ID=me
   mkdir -p "$HOME" "$FIX/screens" "$root/repo"
   cd "$root/repo" && git init -q && git remote add origin https://github.com/acme/app.git
@@ -815,6 +815,18 @@ echo '[{"presetId":"claude","label":"Claude","command":"claude","args":["--permi
 pf
 expect "preflight: regular preset that auto-approves is flagged" "$(jq -c .presets.claude.regular[0].autoApproves <<<"$out")" true
 expect_exit "preflight: that regular preset is not an auto instance, exit 6" "$pf_rc" 6
+echo '[{"presetId":"opencode","label":"OpenCode","command":"opencode","args":["run","--auto"]}]' >"$FIX/agents.json"
+pf --harness opencode; expect_exit "preflight: OpenCode auto flag exits 0" "$pf_rc" 0
+expect "preflight: OpenCode detected by args without auto label" "$(jq -c .presets.opencode.auto[0].by <<<"$out")" args
+echo '[{"presetId":"opencode","label":"OpenCode","command":"opencode","args":["run","--auto-approve"]}]' >"$FIX/agents.json"
+pf --harness opencode; expect_exit "preflight: OpenCode near-miss flag remains regular" "$pf_rc" 6
+echo '[{"presetId":"agy","label":"Antigravity","command":"agy","args":["--mode","auto"]}]' >"$FIX/agents.json"
+pf --harness antigravity; expect_exit "preflight: Antigravity auto mode exits 0" "$pf_rc" 0
+expect "preflight: Antigravity detected by args without auto label" "$(jq -c .presets.antigravity.auto[0].by <<<"$out")" args
+echo '[{"presetId":"agy","label":"Antigravity","command":"agy","args":["--mode","accept-edits"]}]' >"$FIX/agents.json"
+pf --harness antigravity; expect_exit "preflight: Antigravity regular mode stays regular" "$pf_rc" 6
+echo '[{"presetId":"agy","label":"Antigravity","command":"agy","args":["--dangerously-skip-permissions"]}]' >"$FIX/agents.json"
+pf --harness antigravity; expect_exit "preflight: Antigravity skip permissions exits 0" "$pf_rc" 0
 echo '[{"presetId":"claude","label":"Claude","command":"claude","args":[]},{"presetId":"claude-auto","label":"Claude (auto)","command":"claude","args":[]}]' >"$FIX/agents.json"
 pf; expect "preflight: auto by label" "$(jq -c .presets.claude.auto[0].by <<<"$out")" label
 expect_exit "preflight: report mode does not need an auto instance" "$(echo '[]' >"$FIX/agents.json"; pf --mode report >/dev/null; echo $pf_rc)" 0
