@@ -36,6 +36,10 @@ Codex `$<skill> <ID>`; others `Use the <skill> skill to do <ID>.` Then, in order
   merging or rebasing the base on conflict; an unfixable check goes in `checked:` by name; a PR with no checks at all: run the project's
   tests locally and report them in `checked:` ("no PR checks; local: npm test passed"), since the
   orchestrator merges a PR into an integration branch on that;
+- acceptance criteria: the issue's checklist (free text: the `ask`, one criterion per sentence the
+  worker can check); DONE reports `criteria: <met>/<total>` after `checked:` and, when met < total, one
+  indented `unmet:` line per criterion not met or not verifiable, quoted with why in a few words; no
+  checklist: `n/n` over the criteria the worker derived, listed in `checked:`;
 - end the last message with exactly one block, the marker on its own line (`status.sh` ignores
   mid-sentence markers and blocks still holding `<placeholders>`, so the prompt's own templates
   aren't read as reports):
@@ -47,6 +51,8 @@ pr: <url>
 summary: <one line>
 checked: <what you verified against the task, and the PR's checks in a few words ("5/5
   green"); name only the checks that were red or skipped>
+criteria: <met>/<total>
+  unmet: <a criterion not met or not verifiable, quoted, and why in a few words>
 ```
 
 ```text

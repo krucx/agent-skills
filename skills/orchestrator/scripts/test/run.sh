@@ -113,6 +113,38 @@ expect "worker: marker" "$out" '"marker":"done"'
 expect "worker: wrapped checked rejoined" "$out" '"checked":"ran the export on the sample data and compared it with the fixture"'
 expect "worker: compact shows checked" "$(status --compact)" "worker done, checked: ran the export"
 
+# --- worker block: criteria and unmet lines ----------------------------------------------------
+sandbox
+plan_with "[$(item '#16' in-progress w16 t16)]"
+ws w16 b-#16 "In Progress"; snapshot w16 t16 idle
+cat >"$FIX/screens/t16" <<'EOF'
+⏺ ORCHESTRATOR_WORKER_DONE
+  item: #16
+  pr: https://github.com/acme/app/pull/16
+  summary: Added CSV export
+  checked: ran the export, 3/3 checks green
+  criteria: 4/5
+    unmet: "export is streamed" not verifiable, no large
+    fixture to test with
+    unmet: "docs updated" not met, ran out of time
+
+────────────────────────────
+❯
+EOF
+out=$(status)
+expect "criteria: met" "$out" '"met":4'
+expect "criteria: total" "$out" '"total":5'
+expect "criteria: unmet lines, wrapped one rejoined" "$out" '"unmet":["\"export is streamed\" not verifiable, no large fixture to test with","\"docs updated\" not met, ran out of time"]'
+expect "criteria: compact" "$(status --compact)" "criteria 4/5, 2 unmet"
+printf '%s\n' "ORCHESTRATOR_WORKER_DONE" "item: #16" "pr: https://github.com/acme/app/pull/16" "summary: done" "checked: all" "criteria: 3/3" "" >"$FIX/screens/t16"
+expect "criteria: all met has no unmet" "$(status)" '"criteria":{"met":3,"total":3,"unmet":[]}'
+expect "criteria: all met compact" "$(status --compact)" "criteria 3/3"
+expect_not "criteria: all met compact has no unmet count" "$(status --compact)" "unmet"
+printf '%s\n' "ORCHESTRATOR_WORKER_DONE" "item: #16" "pr: https://github.com/acme/app/pull/16" "summary: done" "checked: all" "" >"$FIX/screens/t16"
+expect "criteria: absent is null" "$(status)" '"criteria":null'
+printf '%s\n' "ORCHESTRATOR_WORKER_DONE" "item: #16" "pr: https://github.com/acme/app/pull/16" "summary: done" "checked: all" "criteria: <met>/<total>" "  unmet: <a criterion not met>" "" >"$FIX/screens/t16"
+expect "criteria: the template placeholder is not a report" "$(status)" '"worker":null'
+
 # --- worker block: the prompt's placeholder template is not a report --------------------------
 sandbox
 plan_with "[$(item '#13' in-progress w13 t13)]"
