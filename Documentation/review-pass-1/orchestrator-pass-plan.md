@@ -89,9 +89,45 @@ Turns ≈ 2 (preflight, plan) + 1 (go) + judgment events (0.3–0.5 per item) + 
 3. SKILL.md rewrite and references split; README update.
 4. Dry run on agent-skills itself (free text, 3 tasks), measure with `usage.py`; then a real run on the Mortgage repo.
 
-## 7. Open questions
+## 7. Decisions (2026-11-14)
 
-1. Script autonomy: may `cycle.sh` merge green sub-PRs into integration branches, dispatch dependents, move tags and send the scripted rebase follow-up with no model turn? Same actions as today's rules, minus the model.
-2. Acceptance: move it into the worker's DONE block (E), or keep it as the orchestrator's one per-item judgment?
-3. Which of these do you actually use: Codex/Gemini/Hermes workers, Linear/Jira trackers, `with prompts`, the run-summary page? Unused ones become references or go.
-4. Chat verbosity: events-only is the recommendation. Do you still want a table every time a PR merges?
+1. **Scripts act on their own, but every action is an event.** `cycle.sh` merges green sub-PRs, dispatches dependents, moves tags and sends the scripted rebase follow-up without a model turn. Each action appends to an `events` log in the plan (`{at, item, action, detail}`: dispatched, pr-opened, merged-into-F1, tag-moved, follow-up-sent, blocked, finished). `watch.sh` prints the events since the last wake; when the model wakes it relays them in one or two lines; `report back` and the finish show the full log. Nothing happens silently.
+2. **Acceptance is hybrid: the worker reports, the orchestrator eyeballs.** The DONE block gains `criteria: <met>/<total>` plus one line per unmet or unclear criterion. `accept.sh <ID>` then builds the eyeball packet: the criteria, the worker's criteria lines and `checked`, the PR's file list with added/removed counts (`gh pr view --json files`), and the diff itself only when the PR is small (under about 150 changed lines; otherwise names only). The model eyeballs every DONE item that arrived since the last wake in **one** turn, answers `ok` or `gap: <text>` per item, and `accept.sh` writes the plan and sends the one follow-up. Still never a second round; a remaining gap goes under the table.
+3. **Workers: Claude, Codex, OpenCode, Antigravity.** The harness → first-line and auto-approve rules live in `dispatch.sh` and `preflight.sh`, not in SKILL.md; SKILL.md keeps one line. Add OpenCode and Antigravity to `dispatch.sh`'s first-line case and to the auto-instance detection, after verifying each one's skill-invocation syntax and auto-approve flag against its current CLI (open task; today only `claude`, `hermes` and `codex` are named). Trackers: GitHub Issues and free text stay in the core; Linear/Jira move to `references/trackers.md`.
+4. **Summary page stays, at zero model cost.** `summary.sh <plan>` renders the HTML from the plan alone (items, PRs, `checked`, acceptance, extras, events, carry-over) and publishes with `superset pages publish --visibility just_me`, reusing `pageId` for a new version. The finish runs it and prints the URL; no question is asked. "org" visibility on request.
+5. **Chat is events-only.** Plan, go, judgment wakes (with the events since the last one), user questions, finish. Table only on go, report back, finish, and when `table.sh` says a row changed.
+
+## 8. Amendments to section 4 from the decisions
+
+- A: `cycle.sh` writes the `events` log; `watch.sh` prints new events on every wake; `accept.sh` batches all pending DONE items into one packet.
+- B: SKILL.md keeps a one-line harness list and points to `dispatch.sh`; Linear/Jira go to `references/trackers.md`.
+- C: the summary question is gone; `summary.sh` runs at finish.
+- E: adopted as the hybrid in decision 2; the "never code" rule relaxes to "diff only when small, via `accept.sh`".
+- Worker prompt (`worker-prompt.md`, `dispatch.sh`): add the `criteria:` lines to the DONE block; `status.sh` parses them.
+- Schema (`plan-schema.md`): add `events` (array) and `criteria` (item: `{met, total, unmet: [...]}`).
+
+## 9. Order of work (final)
+
+1. `cycle.sh` with the `events` log, `table.sh`, tests per transition row. SKILL.md untouched; run one real cycle alongside the prose to confirm parity.
+2. `watch.sh`, `preflight.sh`, `accept.sh` (batched eyeball packet), `send.sh`, `summary.sh`; worker DONE block gains `criteria:`; `status.sh` parses it.
+3. OpenCode and Antigravity in `dispatch.sh` and auto detection, after checking their CLIs.
+4. SKILL.md rewrite and references split (`integrations.md`, `approval.md`, `recovery.md`, `trackers.md`); README update.
+5. `scripts/usage.py`; dry run on agent-skills (free text, 3 tasks), measured; then a real GitHub-issues run on the Mortgage repo, measured against the section 1 baseline.
+
+## 10. Issues (krucx/agent-skills, filed 2026-11-14)
+
+| Step | Issue | Blocked by |
+| --- | --- | --- |
+| Schema: `events` log and `criteria` | #45 | — |
+| `table.sh` | #46 | — |
+| `preflight.sh` | #47 | — |
+| OpenCode and Antigravity workers | #48 | — |
+| Worker DONE block reports `criteria:` | #49 | #45 |
+| `cycle.sh` | #50 | #45, #46 |
+| `summary.sh` | #51 | #45 |
+| `watch.sh` and the waiter noise filter | #52 | #50 |
+| `accept.sh` and `send.sh` | #53 | #49, #50 |
+| SKILL.md rewrite and references split | #54 | #47, #48, #52, #53, #51 |
+| `usage.py` and the measured runs | #55 | #54 |
+
+Wave 1: #45, #46, #47, #48. Wave 2: #49, #50, #51. Wave 3: #52, #53. Then #54, then #55.
