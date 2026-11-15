@@ -8,8 +8,8 @@ Usage (run with -I; standard library only):
 A turn is one assistant transcript line that carries token usage (the convention of the Nov 2026
 baseline in Documentation/review-pass-1/orchestrator-pass-plan.md). Peak context is the largest
 input of any turn (input + cache-read + cache-write tokens). Tool calls are counted once per
-tool_use id: plan.sh, cycle.sh, watch.sh, other Bash, other tools; "text" counts turns that
-called no tool. "hand plan writes" counts Bash calls that pipe jq into `plan.sh write`, which
+tool_use id: plan.sh, cycle.sh, watch.sh, other Bash, other tools; "chat-only" counts non-empty
+assistant text turns with no tool call. "hand plan writes" counts Bash calls that pipe jq into `plan.sh write`, which
 the orchestrator should never need.
 
 --turns N counts only the first N turns of each transcript (to isolate the orchestrator portion
@@ -30,9 +30,9 @@ import sys
 from datetime import datetime
 
 COLS = ("turns", "output", "cache_write", "cache_read", "peak", "secs",
-        "plan", "cycle", "watch", "bash", "other", "text", "hand")
+        "plan", "cycle", "watch", "bash", "other", "chat", "hand")
 HEAD = ("turns", "output", "cache-write", "cache-read", "peak ctx", "duration",
-        "plan.sh", "cycle.sh", "watch.sh", "bash", "other", "text", "hand writes")
+        "plan.sh", "cycle.sh", "watch.sh", "bash", "other", "chat-only", "hand writes")
 
 
 def ts(s):
@@ -69,8 +69,11 @@ def measure(path, max_turns=None):
                 t["last"] = ts(when)
             blocks = msg.get("content")
             calls = [b for b in blocks if b.get("type") == "tool_use"] if isinstance(blocks, list) else []
-            if not calls:
-                t["text"] += 1
+            has_text = isinstance(blocks, list) and any(
+                b.get("type") == "text" and b.get("text", "").strip() for b in blocks
+            )
+            if not calls and has_text:
+                t["chat"] += 1
             for b in calls:
                 if b.get("id") in seen:
                     continue
