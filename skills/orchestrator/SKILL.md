@@ -29,14 +29,18 @@ scripts inside the repo. Never write jq against the plan: only `plan.sh write` c
    message). Owners, takeover, carry-over, close: [recovery](references/recovery.md).
 2. **Plan**: rules below, then `plan.sh write`; [schema](references/plan-schema.md).
 3. **Go message**: one message with everything at once.
-4. **Watch**: `<skill-dir>/scripts/watch.sh <project-id> <plan-file>` in the background (foreground
-   with a short timeout where the harness has no background notifications). It runs `cycle.sh`
-   (transitions, merge gate, integrations, dispatch, tags) and exits with the new events and the
-   `needs` JSON. `cycle.sh` alone for a one-off pass.
+4. **Watch**: start `<skill-dir>/scripts/watch.sh <project-id> <plan-file>` in the background
+   (foreground with a short timeout where the harness has no background notifications). It runs
+   `cycle.sh` (transitions, merge gate, integrations, dispatch, tags) and exits with new events and
+   the `needs` JSON. `cycle.sh` alone for a one-off pass. Starting the watcher and waiting are
+   mechanical: do not narrate them in chat.
 5. **Act on each `needs`** (below), then restart `watch.sh`. Exit `finished`: step 6;
-   `taken-over`: stop, tell the user.
-6. **Finish**: `summary.sh <plan-file>` publishes the run summary page without asking; tell the
-   user the URL.
+   `taken-over`: stop and report that event. If a wake has no new events requiring judgment or user
+   action, restart the watcher silently. A timeout or routine state change is not a chat event.
+6. **Finish**: `finish.sh <project-id> <plan-file>` prints the current plan-derived status table
+   and complete chronological events log in chat (including the `finished` event; empty items and
+   events are called out explicitly). Then `summary.sh <plan-file>` publishes the run summary page
+   without asking; tell the user the URL.
 
 ## Planning
 
@@ -93,9 +97,16 @@ merge ("redo the config once #341 lands") is recorded as the item's `followUp` i
 
 ## Reporting
 
-Events only: the plan, the go, a wake with the events since the last one, answers to the user's
-questions, the finish. No status table of your own: print one only when `table.sh <project-id>
-<plan-file>` prints one (it prints `unchanged` otherwise). Below it, only what needs the user:
+Chat is events-only. Speak for the plan and go message, a judgment or user-action event from a
+watch wake, a user question, an explicit report-back, and the finish. On a judgment wake, report the
+new events needed to explain the judgment in one concise update; do not add a progress recap. If the
+wake contains only mechanical events that need no user action or model judgment, take the scripted
+action and restart the watcher without a chat message. Never narrate routine polling, waiting,
+unchanged status, or a watcher restart. The watcher output and plan event log are the record of
+mechanical progress. At finish, `finish.sh` prints both the current status table (using
+`table.sh --force`) and the complete events log from the plan. At other times, no status table of
+your own: print one only when `table.sh <project-id> <plan-file>` prints one (it prints `unchanged`
+otherwise). Below it, only what needs the user:
 worker questions, blocked reasons, stalls, dependency decisions, acceptance gaps, possible
 follow-ups (`extras`), a just-in-review item's `checked`.
 

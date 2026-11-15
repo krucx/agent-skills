@@ -153,3 +153,35 @@ Acceptance criteria of #55:
 - [ ] Both measured runs recorded in this document: partly met. The dry run is recorded above; the Mortgage run is deferred to the user.
 - [ ] The real run's transcript has no hand-written plan writes and a table only at go, wakes with changed rows and finish: unmet, depends on the Mortgage run, deferred to the user.
 - [ ] Misses filed as issues and linked here: unmet, depends on the measured runs; none filed.
+
+## 12. Events-only follow-up (#78)
+
+The larger available transcript is run `20261114-2058`, orchestrating #45–#55 and the F1 integration
+worker on `feature/45-events-log-and-criteria-in-plan-schema`. It has 11 issue workers, a dependency
+chain through #49/#50 → #52/#53 → #54 → #55, and an integration worker. That is representative in
+workflow depth and worker volume: 476 worker turns and 443K output tokens, compared with 3 workers
+and 22K output tokens in the earlier dry run. The earlier run has no dependency chain and is too
+small to use for the efficiency target.
+
+Measured with `python3 -I skills/orchestrator/scripts/usage.py --run 20261114-2058`:
+
+| Run | Orchestrator turns | Chat-only turns | Orchestrator output | Worker output | Output share | Orchestrator cache-read | Worker cache-read | Cache-read share | Peak context |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `20261114-2058` (11 issues + integration; pre-#78 protocol) | 192 | 41 | 73K | 443K | 16.6% | 22.1M | 46.4M | 47.7% | 157K |
+
+The output target is under 10%, so this baseline misses it. `usage.py` counts chat-only turns as
+non-empty assistant text messages without a tool call; the previous counter included 45 empty
+assistant continuation turns in its count of 86 no-tool turns. Transcript review found routine
+wait/status narration (for example, messages saying the watcher was still running or nothing had
+changed). Those are the misses this issue addresses; no separate follow-up issue was filed because
+they fall within #78's scope. The events-only rule in `skills/orchestrator/SKILL.md` now prohibits
+that narration, requires silent restarts when a wake needs no judgment or user action, and limits
+judgment updates to the new events that explain the decision. Mechanical progress remains in the
+watcher output and event log.
+
+This transcript predates #78, so it establishes the problem and workload size; it does not verify
+the revised rule. A post-change representative run has not been recorded: the current agent-skills
+orchestration plan already owns this repository, and starting another run here would collide with
+that active plan. Re-measure after that run releases the plan. The post-change transcript must show
+that every non-empty orchestrator chat message is a plan/go, event-driven judgment or user action,
+user question, explicit report-back, or finish; record any violations as linked follow-up issues.

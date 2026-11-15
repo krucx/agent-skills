@@ -110,9 +110,15 @@ if [[ -n $slug ]]; then
         if $takeover; then
           plan=$(jq -nc --arg p "$plan_file" --arg t "$first" '{path: $p, claim: "taken-over", takenOver: true, detail: $t}')
         else
-          carry=null; [[ -n $rest ]] && jq -e . >/dev/null 2>&1 <<<"$rest" && carry=$(jq -c '.carryOver' <<<"$rest")
-          plan=$(jq -nc --arg p "$plan_file" --arg c "$first" --argjson co "$carry" \
-            '{path: $p, claim: $c} + (if $co != null then {carryOver: $co} else {} end)')
+          carry=null integrations=null
+          if [[ -n $rest ]] && jq -e . >/dev/null 2>&1 <<<"$rest"; then
+            carry=$(jq -c '.carryOver' <<<"$rest")
+            integrations=$(jq -c '.integrationCarryOver // []' <<<"$rest")
+          fi
+          plan=$(jq -nc --arg p "$plan_file" --arg c "$first" --argjson co "$carry" --argjson ic "$integrations" \
+            '{path: $p, claim: $c}
+             + (if $co != null then {carryOver: $co} else {} end)
+             + (if ($ic | length) > 0 then {integrationCarryOver: $ic} else {} end)')
         fi ;;
       3) plan=$(jq -nc --arg p "$plan_file" --argjson o "$(jq -c . <<<"$out" 2>/dev/null || echo null)" '{path: $p, claim: "live-owner", owner: $o}')
          raise 3 ;;
@@ -144,21 +150,32 @@ if [[ $mode != close && -n $project_id ]]; then
 fi
 
 # --- presets -----------------------------------------------------------------------------------
-# An auto instance: the harness's presetId with "(auto)" in the label, claude --permission-mode
-# auto, or codex --approve-for-me. Any other instance is regular; one that auto-approves by its
-# args is flagged.
+# An auto instance: the harness's presetId with "(auto)" in the label, or the harness-specific
+# auto-approve CLI args. Any other instance is regular; one that auto-approves by its args is flagged.
 presets=null
 if $host_ok && agents=$("$cli" agents list --local --json 2>/dev/null) && jq -e . >/dev/null 2>&1 <<<"$agents"; then
   hs=$(printf '%s\n' "${harnesses[@]}" | jq -R . | jq -sc .)
   presets=$(jq -c --argjson hs "$hs" '
-    def args_auto: ((.args // []) | join(" ")) | test("--permission-mode[= ]auto|--approve-for-me");
+    def args_auto($h):
+      (.args // []) as $args
+      | if ($h | ascii_downcase) == "claude" then
+          any($args | to_entries[]; .value == "--permission-mode" and $args[.key + 1] == "auto")
+          or any($args[]; . == "--permission-mode=auto")
+        elif ($h | ascii_downcase) == "codex" then any($args[]; . == "--approve-for-me")
+        elif ($h | ascii_downcase) == "opencode" then any($args[]; . == "--auto")
+        elif ($h | ascii_downcase) == "agy" or ($h | ascii_downcase) == "antigravity" then
+          any($args | to_entries[]; .value == "--mode" and $args[.key + 1] == "auto")
+          or any($args[]; . == "--mode=auto" or . == "--dangerously-skip-permissions")
+        else false end;
     def labelled: (.label // "") | test("\\(auto\\)"; "i");
     def kind($h): if labelled then "auto-label"
-      elif args_auto then (if .presetId == $h then "regular-auto-approves" else "auto-args" end)
+      elif args_auto($h) then
+        (if (($h == "claude" or $h == "codex") and .presetId == $h) then "regular-auto-approves" else "auto-args" end)
       else "regular" end;
     (if type == "array" then . else (.agents // []) end) as $all
     | reduce $hs[] as $h ({};
-        ([$all[] | select((.presetId // "" | ascii_downcase | startswith($h)) or (.command // "" | ascii_downcase | contains($h)))
+        ([$all[] | select((.presetId // "" | ascii_downcase | startswith($h)) or (.command // "" | ascii_downcase | contains($h)) or
+          ($h == "antigravity" and ((.presetId // "" | ascii_downcase) == "agy" or (.command // "" | ascii_downcase) == "agy")))
           | {presetId, label, kind: kind($h)}]) as $mine
         | .[$h] = {auto: [$mine[] | select(.kind | startswith("auto")) | {presetId, label, by: (.kind | sub("auto-"; ""))}],
                    regular: [$mine[] | select(.kind | startswith("regular")) | {presetId, label, autoApproves: (.kind == "regular-auto-approves")}]})' <<<"$agents" 2>/dev/null) || presets=null
