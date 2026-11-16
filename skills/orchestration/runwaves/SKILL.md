@@ -31,8 +31,11 @@ On Paradev, first `<skill-dir>/scripts/preflight.sh`; non-zero exit: read
 - **Dependencies**: explicit (blocked by, after, parent/child) or conflicts (same files, migration,
   schema; smaller first). Outside the run: closed-completed is met, else the dependent `waiting`.
   Large chain link: suggest once a small interface/stub task.
-- **Waves** ≤ the limit, independent and unblockers first; `runId` = `YYYYMMDD-HHMM`. Table: item,
-  title, wave, depends on, target, skill, agent. Squash-only repos: dependents wait for the merge.
+- **Waves** ≤ the limit, independent and unblockers first; `runId` = `YYYYMMDD-HHMM`. Show the
+  table `<skill-dir>/scripts/table.sh --go <plan-file>` prints, as printed: waves, critical marks
+  (every longest dependency chain) and targets come from the plan. To move an item, change its
+  `dependsOn` or state and reshow; never edit the table. Squash-only repos: dependents wait for the
+  merge.
 
 ## Go message
 

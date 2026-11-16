@@ -14,8 +14,8 @@
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
-default_base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)
-default_base=${default_base:-main}
+. "$here/common.sh"
+default_base=$(default_branch)
 
 fetch() { # fetch <epic> [plan]
   local epic=$1 plan=${2:-} repo parent subs planned='[]'

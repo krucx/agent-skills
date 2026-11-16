@@ -2,6 +2,7 @@
 # Render the run's status table (SKILL.md, "Status table") from the plan and status.sh rows.
 #
 # Usage: table.sh [--force] [--rows <file|->] <project-id> <plan-file>   (inside the repo the PRs belong to)
+#        table.sh --go <plan-file>                                         the go message's plan table
 #
 # Rows come from status.sh (run here unless --rows gives its JSON lines: a file, or - for stdin, so
 # a cycle that already ran status.sh doesn't run it again). Facts (agent state, PR, sidebar group)
@@ -9,31 +10,61 @@
 # have no workspace yet.
 # The last render is remembered in ~/.agents/orchestrator/tables/<plan's runId, else project>.md;
 # a render equal to it prints the single line `unchanged` unless --force is given.
+#
+# --go renders the go message's plan table (SKILL.md, "Planning") from the plan alone, never cached:
+# one row per item not skipped, in plan order, with its wave (or done/waiting), critical mark and
+# target from planlib.jq, and up to five critical paths below. Exit 1 on a dependency cycle.
 set -euo pipefail
 
 force=''
 rows_from=''
+go=''
 while [[ ${1:-} == --* ]]; do
   case $1 in
     --force) force=1; shift ;;
     --rows) rows_from=${2:?--rows needs a file or -}; shift 2 ;;
+    --go) go=1; shift ;;
     *) echo "table.sh: unknown option $1" >&2; exit 1 ;;
   esac
 done
+here=$(cd "$(dirname "$0")" && pwd)
+. "$here/common.sh"
+esc='def esc: tostring | gsub("\\|"; "\\|") | gsub("\n"; " ");'
+
+if [[ -n $go ]]; then
+  plan=${1:?usage: table.sh --go <plan-file>}
+  plan_jq "$esc"'
+    def list: if length > 0 then join(", ") else "—" end;
+    . as $p | critical(5) as $c | waves(.maxParallel // 5; $c.items) as $w
+    | [.items[] | select(.state != "skipped")] as $items
+    | ["| Item | Title | Wave | Depends on | Critical | Target | Skill | Agent |",
+       "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+      + (if ($items | length) == 0 then ["| (no items) | — | — | — | — | — | — | — |"]
+         else [$items[] | . as $it
+           | "| \(.id | esc) | \(.title // "" | esc) | \($w[.id] // (if .state == "done" then "done" else "waiting" end))"
+             + " | \(.dependsOn // [] | list | esc) | \(if $c.items | index($it.id) then "yes" else "—" end)"
+             + " | \(target($p.integrations; $base) // "—" | esc) | \(.skill // "—" | esc)"
+             + " | \([.agent, .preset] | map(select(. != null)) | join(" ") | if . == "" then "—" else esc end) |"]
+         end)
+      + (if ($c.paths | length) > 0 then [""] + [$c.paths[] | "Critical path (\($c.length)): \(join(" → "))"]
+           + (if $c.pathCount > ($c.paths | length) then ["… and \($c.pathCount - ($c.paths | length)) more of length \($c.length)"] else [] end)
+         else [] end)
+    | .[]' "$plan" -r --arg base "$(default_branch)"
+  exit
+fi
+
 project=${1:?usage: table.sh [--force] [--rows <file|->] <project-id> <plan-file>}
 plan=${2:?usage: table.sh [--force] [--rows <file|->] <project-id> <plan-file>}
-here=$(cd "$(dirname "$0")" && pwd)
 
 if [[ -z $rows_from ]]; then rows=$("$here/status.sh" "$project" "$plan")
 elif [[ $rows_from == - ]]; then rows=$(cat)
 else rows=$(cat "$rows_from")
 fi
 
-table=$(jq -rn --slurpfile plan "$plan" --argjson rows "$(jq -sc . <<<"${rows:-}")" '
+table=$(jq -rn --slurpfile plan "$plan" --argjson rows "$(jq -sc . <<<"${rows:-}")" "$esc"'
   $plan[0] as $p
   | ($p.items // []) as $items
-  | def esc: tostring | gsub("\\|"; "\\|") | gsub("\n"; " ");
-    def row($id): [$rows[] | select(.item == $id)][0];
+  | def row($id): [$rows[] | select(.item == $id)][0];
     def prnum($it; $r):
       if $r.pr then "#\($r.pr.number)"
       elif ($it.pr | type) == "string" then ($it.pr | capture("(?<n>[0-9]+)/?$").n // null | if . then "#" + . else "—" end)

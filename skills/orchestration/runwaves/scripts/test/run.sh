@@ -271,6 +271,10 @@ jq '.items[0].pr = "https://github.com/acme/app/pull/388" | .integrations = [{id
 "$scripts/plan.sh" write "$root/next.json" >/dev/null 2>&1
 expect_exit "write: URL and null pass" $? 0
 expect "write: URL is stored" "$(jq -r '.items[0].pr' "$plan")" "https://github.com/acme/app/pull/388"
+jq '.items += [.items[0]]' "$plan" >"$root/next.json"
+out=$("$scripts/plan.sh" write "$root/next.json" 2>&1); code=$?
+expect_exit "write: a duplicate item id is rejected" $code 1
+expect "write: names the id" "$out" "#5: item id used 2 times"
 
 # --- events log and criteria ------------------------------------------------------------------------
 sandbox
@@ -723,6 +727,78 @@ plan_with "[$(chain_item '#1' 'Root'), $(chain_item '#2' 'Left' '["#1"]'), $(cha
 expect "chains: a diamond is one chain" "$("$scripts/chains.sh" offer "$plan" | wc -l | tr -d ' ')" "1"
 plan_with "[$(chain_item '#1' 'Solo' '["#99"]')]"
 expect "chains: an outside dependency is no chain" "$("$scripts/chains.sh" offer "$plan")" ""
+
+# critical path: every longest dependsOn chain, listed in plan order
+crit() { "$scripts/chains.sh" critical "$plan" 2>&1; }
+plan_with "[$(chain_item '#3' 'C' '["#2"]'), $(chain_item '#1' 'A'), $(chain_item '#2' 'B' '["#1"]'), $(chain_item '#9' 'Lone')]"
+expect "critical: a linear chain, first to last" "$(crit)" '{"length":3,"items":["#3","#1","#2"],"paths":[["#1","#2","#3"]],"pathCount":1}'
+plan_with "[$(chain_item '#1' 'Root'), $(chain_item '#2' 'Left' '["#1"]'), $(chain_item '#3' 'Right' '["#1"]'),
+  $(chain_item '#4' 'Join' '["#3","#2"]')]"
+expect "critical: a diamond has both branches" "$(crit)" '"paths":[["#1","#2","#4"],["#1","#3","#4"]],"pathCount":2'
+plan_with "[$(chain_item '#1' 'Root'), $(chain_item '#2' 'Long' '["#1"]'), $(chain_item '#3' 'Short'),
+  $(chain_item '#4' 'Join' '["#2","#3"]')]"
+expect "critical: an item on no longest chain is not critical" "$(crit)" '"items":["#1","#2","#4"]'
+plan_with "[$(chain_item '#1' 'A'), $(chain_item '#3' 'C'), $(chain_item '#2' 'B' '["#1"]'), $(chain_item '#4' 'D' '["#3"]')]"
+expect "critical: two equal chains are both critical" "$(crit)" '{"length":2,"items":["#1","#3","#2","#4"],"paths":[["#1","#2"],["#3","#4"]],"pathCount":2}'
+plan_with "[$(chain_item '#1' 'A'), $(chain_item '#2' 'B' '["#99"]'), $(chain_item '#3' 'C')]"
+expect "critical: independent items have no path longer than 1" "$(crit)" '{"length":1,"items":[],"paths":[],"pathCount":0}'
+plan_with "[$(chain_item '#1' 'A'), $(chain_item '#2' 'B' '["#1"]' | jq -c '.state = "skipped"'), $(chain_item '#3' 'C' '["#2"]')]"
+expect "critical: a skipped item breaks the chain" "$(crit)" '"items":[]'
+plan_with "[$(chain_item '#1' 'A' | jq -c '.state = "done"'), $(chain_item '#2' 'B' '["#1"]'), $(chain_item '#3' 'C' '["#2"]'),
+  $(chain_item '#4' 'D'), $(chain_item '#5' 'E' '["#4"]')]"
+expect "critical: a done item is off the path, its dependency met" "$(crit)" '{"length":2,"items":["#2","#3","#4","#5"]'
+plan_with '[]'
+expect "critical: an empty plan" "$(crit)" '{"length":0,"items":[],"paths":[],"pathCount":0}'
+# a ladder of diamonds: 2^6 longest chains, five listed and all counted
+ladder='[]' prev=''
+for k in 1 2 3 4 5 6; do
+  ladder=$(jq -c --arg k "$k" --arg p "$prev" '. + [{id: "r\($k)", state: "queued", dependsOn: (if $p == "" then [] else [$p] end)},
+    {id: "l\($k)", state: "queued", dependsOn: ["r\($k)"]}, {id: "m\($k)", state: "queued", dependsOn: ["r\($k)"]},
+    {id: "j\($k)", state: "queued", dependsOn: ["l\($k)", "m\($k)"]}]' <<<"$ladder")
+  prev="j$k"
+done
+plan_with "$ladder"
+expect "critical: many tied chains are counted, five listed" "$(crit | jq -c '[.length, .pathCount, (.paths | length)]')" '[18,64,5]'
+plan_with "[$(chain_item '#1' 'A' '["#2"]'), $(chain_item '#2' 'B' '["#1"]')]"
+expect "critical: a cycle is refused" "$(crit)" "dependency cycle in $plan"
+expect_exit "critical: a cycle exits 1" "$("$scripts/chains.sh" critical "$plan" >/dev/null 2>&1; echo $?)" 1
+expect_exit "waves: a cycle exits 1" "$("$scripts/chains.sh" waves "$plan" >/dev/null 2>&1; echo $?)" 1
+expect "critical: a missing plan is not called a cycle" "$("$scripts/chains.sh" critical "$FIX/nope.json" 2>&1)" "Could not open file"
+plan_with '[{"id": "#1", "state": "queued", "dependsOn": "#2"}]'
+expect_not "critical: a malformed dependsOn is not called a cycle" "$(crit)" "dependency cycle"
+expect_exit "critical: a malformed dependsOn exits 1" "$("$scripts/chains.sh" critical "$plan" >/dev/null 2>&1; echo $?)" 1
+
+# waves: after every dependency, at most maxParallel each, critical items first
+plan_with "[$(chain_item '#8' 'Lone'), $(chain_item '#1' 'A'), $(chain_item '#2' 'B' '["#1"]'), $(chain_item '#3' 'C' '["#2"]')]"
+expect "waves: dependencies come first" "$("$scripts/chains.sh" waves "$plan")" '{"#1":1,"#8":1,"#2":2,"#3":3}'
+jq '.maxParallel = 1' "$plan" >"$plan.t" && mv "$plan.t" "$plan"
+expect "waves: under the limit the critical chain goes first" "$("$scripts/chains.sh" waves "$plan")" '{"#1":1,"#2":2,"#3":3,"#8":4}'
+jq '.maxParallel = 0' "$plan" >"$plan.t" && mv "$plan.t" "$plan"
+expect "waves: a limit under 1 counts as 1" "$("$scripts/chains.sh" waves "$plan")" '{"#1":1,"#2":2,"#3":3,"#8":4}'
+plan_with "[$(chain_item '#1' 'A'), $(chain_item '#2' 'B' '["#1"]' | jq -c '.state = "waiting"'), $(chain_item '#3' 'C' '["#2"]'),
+  $(chain_item '#4' 'D' '["#9"]')]"
+expect "waves: a waiting item and its dependents get none" "$("$scripts/chains.sh" waves "$plan")" '{"#1":1,"#4":1}'
+
+# table.sh --go: the go message's plan table
+plan_with "[$(chain_item '#1' 'Root' | jq -c '. + {skill: "implement", agent: "claude", preset: "auto"}'),
+  $(chain_item '#2' 'Left | pipe' '["#1"]' 'F1'), $(chain_item '#3' 'Right' '["#1"]'), $(chain_item '#4' 'Join' '["#2","#3"]'),
+  $(chain_item '#5' 'Lone' | jq -c '.state = "skipped"'), $(chain_item '#6' 'Later' '["#7"]' | jq -c '.state = "waiting"'),
+  $(chain_item '#8' 'Shipped' | jq -c '.state = "done"')]" \
+  '{"integrations": [{"id": "F1", "title": "x", "branch": "feature/x", "base": "main", "pr": null, "state": "open"}]}'
+out=$("$scripts/table.sh" --go "$plan")
+expect "go table: header" "$out" "| Item | Title | Wave | Depends on | Critical | Target | Skill | Agent |"
+expect "go table: a critical row" "$out" "| #1 | Root | 1 | — | yes | main | implement | claude auto |"
+expect "go table: target is the integration branch, pipes escaped" "$out" '| #2 | Left \| pipe | 2 | #1 | yes | feature/x | — | — |'
+expect_not "go table: a skipped item is left out" "$out" "| #5 |"
+expect "go table: a waiting item says so" "$out" "| #6 | Later | waiting | #7 | — | main | — | — |"
+expect "go table: a done item says so" "$out" "| #8 | Shipped | done | — | — | main | — | — |"
+expect "go table: each critical path below" "$out" "Critical path (3): #1 → #2 → #4"
+expect "go table: the tied path too" "$out" "Critical path (3): #1 → #3 → #4"
+expect "go table: --force is accepted and changes nothing" "$("$scripts/table.sh" --force --go "$plan")" "$out"
+plan_with "$ladder"
+expect "go table: paths beyond five are counted" "$("$scripts/table.sh" --go "$plan")" "… and 59 more of length 18"
+plan_with "[$(chain_item '#1' 'A' '["#2"]'), $(chain_item '#2' 'B' '["#1"]')]"
+expect "go table: a cycle is refused" "$("$scripts/table.sh" --go "$plan" 2>&1)" "dependency cycle"
 
 # a shared feature branch takes every item, chains included, and nothing is left to offer
 sandbox

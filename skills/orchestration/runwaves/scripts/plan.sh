@@ -12,7 +12,8 @@
 #                                 asks. "free" is followed by a closed run's carryOver, if any.
 #   plan.sh write <json-file>     replace the plan with <json-file> (sets owner and heartbeat);
 #                                 exit 1 if an item's or integration's pr is not a URL string or null,
-#                                 an events entry is malformed or an item's criteria is invalid
+#                                 an events entry is malformed, an item's criteria is invalid or
+#                                 two items share an id
 #   plan.sh event <item> <action> "<detail>"
 #                                 append one entry to the events log under the lock (owner-checked,
 #                                 exit 3 if not the owner); <item> is an ID, F1 or "null"
@@ -153,7 +154,7 @@ case ${1:-} in
                     | "\(.id): pr must be a PR URL string, not \(.pr | tojson)"] | .[]' "$2")
     [[ -z "$badpr" ]] || { echo "$badpr" >&2; exit 1; }
     # events entries carry at, item (an ID or null), action from the fixed list and detail;
-    # criteria is null or {met <= total (integers), unmet: [...]}.
+    # criteria is null or {met <= total (integers), unmet: [...]}; item ids are unique.
     badev=$(jq -r --argjson actions "$actions" '
       (if (.events // []) | type != "array" then "events: must be an array" else empty end),
       ((.events // []) | if type == "array" then to_entries[] else empty end
@@ -166,7 +167,8 @@ case ${1:-} in
         | select(.criteria | (type == "object" and (.met | type) == "number" and (.total | type) == "number"
                               and .met == (.met | floor) and .total == (.total | floor) and .met >= 0
                               and .met <= .total and (.unmet | type) == "array") | not))
-       | "\(.id): criteria needs integer met <= total and an unmet array, got \(.criteria | tojson)")' "$2")
+       | "\(.id): criteria needs integer met <= total and an unmet array, got \(.criteria | tojson)"),
+      ([.items[]?.id] | group_by(.)[] | select(length > 1) | "\(.[0]): item id used \(length) times")' "$2")
     [[ -z "$badev" ]] || { echo "$badev" >&2; exit 1; }
     # The first write owns the run identity. Ignore model-authored values; subsequent writes
     # preserve the original identity even if their input JSON tries to change it.
@@ -208,7 +210,7 @@ case ${1:-} in
     jq --arg now "$now" '.heartbeat = $now' "$plan" | put
     ;;
   *)
-    sed -n "2,27p" "$0"
+    sed -n "2,28p" "$0"
     exit 1
     ;;
 esac
