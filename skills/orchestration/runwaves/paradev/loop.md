@@ -1,12 +1,12 @@
 # Paradev loop
 
-Paradev-only: watch, act, report, finish. Read after the plan is approved and dispatched
-([fanout.md](fanout.md)). `<skill-dir>` = the folder holding SKILL.md; run scripts inside the repo.
+Loop backend only: watch, act, report, finish. Read after the plan is approved and dispatched
+([dispatch.md](dispatch.md)). `<skill-dir>` = the folder holding SKILL.md; run scripts inside the repo.
 Never write jq against the plan: only `plan.sh write` changes it.
 
 | User says | Mode |
 | --- | --- |
-| items, `feature #400`, `feature: <text>`, free text | Run: SKILL.md planning, fanout, then steps 4-6 |
+| items, `feature #400`, `feature: <text>`, free text | Run: SKILL.md planning, dispatch, then steps 4-6 |
 | "continue" | Run preflight (`--mode continue`), then steps 4-6 on the saved plan |
 | "report back" / "status" | `preflight.sh --mode report`, then `table.sh`; never starts or messages a worker |
 | "close" | `preflight.sh --mode close`, `plan.sh close`, then step 6 |
