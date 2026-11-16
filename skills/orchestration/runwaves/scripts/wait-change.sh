@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Block until something the orchestrator acts on changes (a worker's agent state, a group tag, a
+# Block until something the coordinator acts on changes (a worker's agent state, a group tag, a
 # workspace vanishing, a PR appearing, merging, closing or turning conflicting), or the timeout.
 # Only plan workspaces count, plus tagged ones whose branch matches a workspace-less plan item;
 # with no plan, all. Polls every POLL_SECONDS (60); meanwhile, where the CLI has `agents wait`,

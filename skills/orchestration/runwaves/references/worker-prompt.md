@@ -19,7 +19,7 @@ Codex `$<skill> <ID>`; others `Use the <skill> skill to do <ID>.` Then, in order
 - `<F>-integrate` only: the sub-PR list, merging `origin/<default>` into the branch (which starts at
   the feature branch), conflicts, the full checks, `git push origin HEAD:feature/<slug>`, then
   `gh pr create --base <default> --head feature/<slug>` listing every sub-PR and linking the issues
-  they close; never merged by the worker or orchestrator;
+  they close; never merged by the worker or coordinator;
 - the goal is an open PR: push and `gh pr create --base <target>` (the item's integration branch,
   else the default branch) even if the skill stops at a commit; ask a human
   decision plainly and stop;
@@ -28,7 +28,7 @@ Codex `$<skill> <ID>`; others `Use the <skill> skill to do <ID>.` Then, in order
   not an obstacle but goes in `checked:` (a block after the PR exists would land in `in-review`);
 - before ending a turn with its own background work running (e.g. code-review subagents), or
   waiting on something external that clears itself: print `ORCHESTRATOR_WORKER_WAITING` (below) once per wait, never
-  per poll or while implementing. Waiting is not blocked (a block needs the orchestrator or user);
+  per poll or while implementing. Waiting is not blocked (a block needs the coordinator or user);
   what it waits on failing is an obstacle; a later DONE/BLOCKED block replaces the wait;
 - done = every PR check passed and the PR is mergeable; never DONE while a check is pending or
   red. Cheaply: `gh pr checks <n> --watch --fail-fast >/dev/null 2>&1; echo exit=$?` (0 = all
@@ -38,7 +38,7 @@ Codex `$<skill> <ID>`; others `Use the <skill> skill to do <ID>.` Then, in order
   `gh pr view <n> --json mergeable,mergeStateStatus,statusCheckRollup`, merging or rebasing the
   base on conflict; an unfixable check goes in `checked:` by name; a PR with no checks at all: run
   the project's tests locally and report them in `checked:` ("no PR checks; local: npm test
-  passed"), since the orchestrator merges a PR into an integration branch on that;
+  passed"), since the coordinator merges a PR into an integration branch on that;
 - local integration only (`local: true`, [integrations](integrations.md)): open no PR and push
   nothing; run the covering test suites before every commit and the full test command before the
   last; done = committed and the full command passed, reported as `pr: none (local integration)`
@@ -70,7 +70,7 @@ needs: <the decision or access required>
 ```
 
 WAITING (not a final report): `status.sh` shows marker `waiting` with `waitingOn`/`resumesWhen`;
-the orchestrator skips the worker while it's the latest block; still latest after 30 minutes =
+the coordinator skips the worker while it's the latest block; still latest after 30 minutes =
 `stale`, which gets a screen check instead.
 
 ```text

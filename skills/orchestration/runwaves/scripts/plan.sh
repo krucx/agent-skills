@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Own and update the repo's plan file safely: one orchestrator per repo's plan at a time. The plan
-# records its owner (the orchestrator's Paradev terminal) and a heartbeat; every write is
+# Own and update the repo's plan file safely: one coordinator per repo's plan at a time. The plan
+# records its owner (the coordinator's Paradev terminal) and a heartbeat; every write is
 # owner-checked, locked and swapped in atomically, so a crash never leaves a half-written plan.
 #
 # Usage (inside the repo):
@@ -23,7 +23,7 @@
 #   plan.sh close                 finish the run now; items not done or skipped go to carryOver
 #
 # An owner is live while its heartbeat is under STALE_MINUTES (45) old and its terminal runs an
-# agent. Exit: 0 ok; 3 a live orchestrator owns the active run (details on stdout); 4 the active
+# agent. Exit: 0 ok; 3 a live coordinator owns the active run (details on stdout); 4 the active
 # run is stale and needs --takeover; 1 anything else.
 set -euo pipefail
 

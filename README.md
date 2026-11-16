@@ -15,10 +15,11 @@ cd agent-skills
 ./install.sh
 ```
 
-`install.sh` symlinks each skill (a folder with a `SKILL.md`, directly under `skills/` or one level down in a group folder such as `skills/orchestration/`) into `~/.agents/skills/` (read by Codex and Gemini CLI, and by
+`install.sh` symlinks each skill into `~/.agents/skills/` (read by Codex and Gemini CLI, and by
 Hermes once it's added to `skills.external_dirs`), and links `~/.claude/skills/` to that for
-Claude Code. The clone is the single source of truth: edit it, and every harness sees the
-change. A `git pull` updates them all.
+Claude Code. A skill is a folder with a `SKILL.md`, directly under `skills/` or one level down
+in a group folder such as `skills/orchestration/`; it installs under its own folder name. The
+clone is the single source of truth: edit it, and every harness sees the change. A `git pull` updates them all.
 
 ### Windows
 
@@ -69,7 +70,7 @@ page. Rarely needed detail lives in `references/` (`integrations.md`, `approval.
 `trackers.md`) and loads only for runs of that shape.
 
 Each repo has one active run at a time. The plan lives in
-`~/.agents/orchestrator/<owner>-<repo>.json`, and finished runs move to
+`~/.agents/orchestrator/<owner>-<repo>.json` (the folder keeps its pre-rename name so existing runs resume), and finished runs move to
 `~/.agents/orchestrator/history/`. The plan records which Paradev terminal owns the run:
 
 - A second run on the same repo is refused while the owner is alive.
