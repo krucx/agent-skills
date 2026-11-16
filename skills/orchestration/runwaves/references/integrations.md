@@ -71,7 +71,7 @@ has a PR, `cycle.sh` records the integration's `pr` URL; after it merges, `cycle
 or drop it ("ship F1 without T3": `skipped` with `dropped: true`, which releases it); a skipped,
 undropped item keeps holding. `empty` (all dropped): tell the user, nothing to land.
 Report back runs `integrate.sh check` only (never `add`): report `held` ones and what holds them, a
-`ready` one as "say 'orchestrator continue' to open its feature PR".
+`ready` one as "say 'runwaves continue' to open its feature PR".
 
 ## Follow-ups after a merge
 

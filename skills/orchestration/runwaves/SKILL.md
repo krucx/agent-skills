@@ -1,20 +1,20 @@
 ---
-name: orchestrator
-description: Master agent that plans a batch of tracker issues (GitHub, Linear, Jira), a feature or epic ("orchestrate feature #400", sub-issues as one integration branch) or free-text work split into tasks, and drives each to its own pull request through Paradev (formerly Superset), one worktree workspace and implement-skill worker each, with a saved, resumable plan and workspaces moved between the In Progress, In Review, Done and Blocked sidebar groups as PRs appear and merge. Also "orchestrator report back" (status table), "continue" (resume a run), "close" (end one). Use whenever the user says "orchestrate", "orchestrate these issues", "orchestrate 340 to 345", "orchestrate and work", "be the master agent", or "orchestrator report back" / "status" / "continue" / "close", even without mentioning Paradev. Not for small ad-hoc fan-outs with no tracker, PRs or need to resume (e.g. "run these 3 refactors in parallel and tell me when done"): those belong to `superset:orchestrate`.
+name: runwaves
+description: Plans a batch of tracker issues (GitHub, Linear, Jira), a feature or epic ("runwaves feature #400", sub-issues as one integration branch) or free-text work split into tasks, and drives each to its own pull request through Paradev (formerly Superset), one worktree workspace and implement-skill worker each, with a saved, resumable plan and workspaces moved between the In Progress, In Review, Done and Blocked sidebar groups as PRs appear and merge. Also "runwaves report back" (status table), "runwaves continue" (resume a run), "runwaves close" (end one). Use whenever the user says "runwaves 340-343", "plan runwaves", "runwaves feature #400", "runwaves report back", "runwaves continue" or "runwaves close", even without mentioning Paradev. Not Orca's built-in skills and not Paradev's own multi-agent skill (the `superset:` one): small ad-hoc fan-outs with no tracker, PRs or need to resume (e.g. "run these 3 refactors in parallel and tell me when done") belong to those.
 compatibility: Needs bash, jq, git, the GitHub CLI (gh, signed in) and the Paradev CLI (superset, paradev or pdev) with this machine's host running. PRs must live on GitHub. Workers run on Claude Code, Codex, OpenCode or Antigravity.
 model: sonnet
 effort: low
 argument-hint: items like "340-343, 345 onwards", "ENG-12 ENG-15", "feature #400" (an epic), "feature: <description>", free text, "report back", "continue", or "close"
 ---
 
-# Orchestrator
+# Runwaves
 
 You coordinate; scripts do the mechanics, you judge. `<skill-dir>` = this file's folder; run
 scripts inside the repo. Never write jq against the plan: only `plan.sh write` changes it.
 
 | User says | Mode |
 | --- | --- |
-| items ("orchestrate 340-343"), `feature #400`, `feature: <text>`, free text | Run |
+| items ("runwaves 340-343"), `feature #400`, `feature: <text>`, free text | Run |
 | "continue" | Run steps 1 and 4-6 on the saved plan |
 | "report back" / "status" | `preflight.sh --mode report`, then `table.sh`; never starts or messages a worker |
 | "close" | `preflight.sh --mode close`, `plan.sh close`, then step 6 |

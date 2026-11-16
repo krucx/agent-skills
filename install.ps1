@@ -45,7 +45,21 @@ function Install-Skill([string]$source, [string]$target) {
 
 $agentsSkills = Join-Path $agents 'skills'
 $claudeSkills = Join-Path (Join-Path $userHome '.claude') 'skills'
-foreach ($skill in Get-ChildItem -LiteralPath (Join-Path $repo 'skills') -Directory) {
+# A skill is a folder holding SKILL.md, directly under skills\ or one level down in a group folder.
+# Skills install by their own folder name; the group name is not part of it.
+$skillDirs = foreach ($dir in Get-ChildItem -LiteralPath (Join-Path $repo 'skills') -Directory) {
+  if (Test-Path -LiteralPath (Join-Path $dir.FullName 'SKILL.md') -PathType Leaf) { $dir }
+  else { Get-ChildItem -LiteralPath $dir.FullName -Directory | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') -PathType Leaf } }
+}
+# The skill that was called "orchestrator" is now "runwaves"; drop a copy this installer left before.
+foreach ($root in @($agentsSkills, $claudeSkills)) {
+  $old = Join-Path $root 'orchestrator'
+  if (Test-Path -LiteralPath (Join-Path $old $marker) -PathType Leaf) {
+    Remove-Item -LiteralPath $old -Recurse -Force
+    Write-Output "removed stale copy $old"
+  }
+}
+foreach ($skill in $skillDirs) {
   Install-Skill $skill.FullName (Join-Path $agentsSkills $skill.Name)
   Install-Skill $skill.FullName (Join-Path $claudeSkills $skill.Name)
 }

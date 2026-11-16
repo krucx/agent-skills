@@ -1,6 +1,6 @@
 # Orchestrator pass: gaps and a token plan (2026-11-14)
 
-Scope: `skills/orchestrator` at commit 9baa3eb. Plan only; nothing changed.
+Scope: `skills/orchestration/runwaves` at commit 9baa3eb. Plan only; nothing changed.
 
 ## 1. Baseline, measured from Claude Code transcripts
 
@@ -9,7 +9,7 @@ Scope: `skills/orchestrator` at commit 9baa3eb. Plan only; nothing changed.
 | 12 issues, 2026-11-13 (Sonnet) | 151 | 114K | 25.6M | 224K | 8 of 12 measured: 129K / 18.3M (≈190K / 27M for all 12) |
 | 4-issue epic, 2026-11-14 (Sonnet) | 73 | 26K | 6.2M | 103K | 4 workers: 20K / 2.4M |
 
-Reproduced with `python3 -I skills/orchestrator/scripts/usage.py` (issue #55). A turn is one assistant transcript line with usage. The 4-issue run matches exactly (73 turns, 26K output, 6.2M cache-read, 103K peak). The 12-issue run's first 151 turns (`--turns 151` on the 2026-11-13 session, the orchestrator portion) give 114K output, 724K cache-write, 20.2M cache-read and a 191K peak at that point (224K later in the session), 37 minutes. The 25.6M cache-read figure above does not reproduce from those 151 turns: the transcript shows 20.2M at turn 151, and 25.6M only appears at about turn 178, so the baseline probably counted a longer window. Use 20.2M as the like-for-like baseline. With all twelve worker transcripts found by branch name (`--run 20261113-1424`), workers total 516 turns, 278K output and 42.7M cache-read, so the orchestrator was 41% of worker output and 47% of worker cache-read (the "8 of 12 measured" worker figures above were partial).
+Reproduced with `python3 -I skills/orchestration/runwaves/scripts/usage.py` (issue #55). A turn is one assistant transcript line with usage. The 4-issue run matches exactly (73 turns, 26K output, 6.2M cache-read, 103K peak). The 12-issue run's first 151 turns (`--turns 151` on the 2026-11-13 session, the orchestrator portion) give 114K output, 724K cache-write, 20.2M cache-read and a 191K peak at that point (224K later in the session), 37 minutes. The 25.6M cache-read figure above does not reproduce from those 151 turns: the transcript shows 20.2M at turn 151, and 25.6M only appears at about turn 178, so the baseline probably counted a longer window. Use 20.2M as the like-for-like baseline. With all twelve worker transcripts found by branch name (`--run 20261113-1424`), workers total 516 turns, 278K output and 42.7M cache-read, so the orchestrator was 41% of worker output and 47% of worker cache-read (the "8 of 12 measured" worker figures above were partial).
 
 So the orchestrator spends about as much as all its workers combined. The bar ("comparable to running the items myself") means the orchestrator should be a small fraction of worker spend, say under 10%.
 
@@ -163,7 +163,7 @@ workflow depth and worker volume: 476 worker turns and 443K output tokens, compa
 and 22K output tokens in the earlier dry run. The earlier run has no dependency chain and is too
 small to use for the efficiency target.
 
-Measured with `python3 -I skills/orchestrator/scripts/usage.py --run 20261114-2058`:
+Measured with `python3 -I skills/orchestration/runwaves/scripts/usage.py --run 20261114-2058`:
 
 | Run | Orchestrator turns | Chat-only turns | Orchestrator output | Worker output | Output share | Orchestrator cache-read | Worker cache-read | Cache-read share | Peak context |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -174,7 +174,7 @@ non-empty assistant text messages without a tool call; the previous counter incl
 assistant continuation turns in its count of 86 no-tool turns. Transcript review found routine
 wait/status narration (for example, messages saying the watcher was still running or nothing had
 changed). Those are the misses this issue addresses; no separate follow-up issue was filed because
-they fall within #78's scope. The events-only rule in `skills/orchestrator/SKILL.md` now prohibits
+they fall within #78's scope. The events-only rule in `skills/orchestration/runwaves/SKILL.md` now prohibits
 that narration, requires silent restarts when a wake needs no judgment or user action, and limits
 judgment updates to the new events that explain the decision. Mechanical progress remains in the
 watcher output and event log.
