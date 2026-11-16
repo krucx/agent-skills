@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Test shim for the GitHub CLI: auth status fails when $FIX/gh-signed-out exists, repo view --json
-# answers $FIX/repo.json (or fails with $FIX/no-repo); pr view answers $FIX/pr-view.json, pr merge records its args in
+# answers $FIX/repo.json (or fails with $FIX/no-repo); pr view <n> answers $FIX/pr-view-<n>.json, else $FIX/pr-view.json, pr merge records its args in
 # $FIX/merge.args, api rules/branches answers $FIX/rules.json; pr list answers from $FIX/prs.json (default: no PRs), honouring
 # --head <branch> and --jq <expr> like the real one.
 set -euo pipefail
@@ -12,7 +12,8 @@ case "$1 ${2:-}" in
     [[ -z $head ]] || out=$(jq -c --arg h "$head" 'map(select(.headRefName == $h))' <<<"$out")
     expr=$(arg --jq "$@")
     if [[ -n $expr ]]; then jq -r "$expr" <<<"$out"; else echo "$out"; fi ;;
-  "pr view") if [[ " $* " == *" --json files "* ]]; then cat "$FIX/pr-files.json"; else cat "$FIX/pr-view.json"; fi ;;
+  "pr view") if [[ " $* " == *" --json files "* ]]; then cat "$FIX/pr-files.json"
+             elif [[ -f $FIX/pr-view-$3.json ]]; then cat "$FIX/pr-view-$3.json"; else cat "$FIX/pr-view.json"; fi ;;
   "pr diff") cat "$FIX/pr.diff" ;;
   "pr merge") echo "$*" >"$FIX/merge.args" ;;
   "auth status") [[ ! -f $FIX/gh-signed-out ]] || { echo "You are not logged in" >&2; exit 1; } ;;

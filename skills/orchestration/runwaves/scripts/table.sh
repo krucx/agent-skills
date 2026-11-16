@@ -103,7 +103,7 @@ table=$(jq -rn --slurpfile plan "$plan" --argjson rows "$(jq -sc . <<<"${rows:-}
         else ([$integs[] | select(.id == $it.integration)][0]) as $f
           | .seen += [$f.id]
           | .out += [header($f)]
-            + [$items[] | select(.integration == $f.id) | line(.)]
+            + [$items[] | select(.integration == $f.id and .integrates == null) | line(.)]
             + [$items[] | select(.integrates == $f.id) | line(.)]
         end
       else .out += [line($it)] end) | .out) as $lines

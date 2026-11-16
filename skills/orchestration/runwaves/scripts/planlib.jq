@@ -1,6 +1,6 @@
 # Plan-derived facts shared by the runwaves scripts; load with plan_jq (common.sh), which includes it.
 
-# Where an item's PR goes: its integration's branch, else $base (integrations never nest). null when
+# Where an item's PR goes: its integration's branch (a local chain branch's too), else $base. null when
 # the item names an integration the plan doesn't have.
 def target($integrations; $base):
   if (.integration // null) == null then $base
@@ -49,3 +49,20 @@ def waves($limit; $crit): graph as $g | depth($g.ids; $g.deps) as $upto | depth(
       | .waves += ([$order[] | select($w[.] == null and all($g.deps[.][]; $w[.] != null))][:$per]
                    | map({key: ., value: $n}) | from_entries))
   | .waves;
+
+# Local chain branches to offer (references/integrations.md): inside each open GitHub integration that
+# has no parent, every run of two or more queued critical items linked one to one (each the only
+# dependency of the next, the next its only dependent), first to last. A fork or a join ends a run;
+# a run that would take every other unskipped item of its integration is not one (make that integration local).
+def local_chains: . as $p | graph as $g | critical(0).items as $crit
+  | [($p.integrations // [])[] | select((.local // false | not) and (.parent // null) == null
+      and (.state // "open") == "open") | .id] as $gh
+  | ($p.items | map({key: .id, value: (.integration // null)}) | from_entries) as $in
+  | [$p.items[] | select(.state == "queued" and (.integration // null) as $i | $i != null and ($gh | index($i)))
+     | .id | select(. as $x | $crit | index($x))] as $ok
+  | def nxt($a): $g.dependents[$a] | select(length == 1) | .[0]
+      | select(. as $b | ($ok | index($b)) and $in[$b] == $in[$a] and $g.deps[$b] == [$a]);
+    def run($a): [$a] + ([nxt($a)] | if length == 0 then [] else run(.[0]) end);
+    [$ok[] | . as $b | select(all($ok[]; [nxt(.)] != [$b])) | run(.) | select(length >= 2)
+     | {items: ., parent: $in[.[0]]} | . as $c
+     | select(any($p.items[]; .integration == $c.parent and .state != "skipped" and (.id as $x | $c.items | index($x) | not)))];

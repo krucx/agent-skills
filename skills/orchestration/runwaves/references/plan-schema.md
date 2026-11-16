@@ -21,15 +21,23 @@
   `dispatch.sh` adds `dispatchFailures`
   after a failed workspace creation.
 - `integrations` (optional; older plans lack it): feature branches that collect a run's PRs.
-  `branch`: `feature/<slug>`; `base`: always the repo's default branch (integrations never nest);
+  `branch`: `feature/<slug>` (`chain/<id>-<slug>` for a local chain branch); `base`: the repo's default
+  branch (integrations never nest), except a local chain branch's: its `parent`'s branch;
   `pr`: the PR that lands it on `base`, once opened; `state`: `open`|`merged`; `mergeNote`
   (optional): `"human"` when its rulesets forbid merge commits (the coordinator then leaves the
   sub-PR merges to humans), `"strict"` once the up-to-date requirement was reported, `"ok"` when `cycle.sh` read its rules and found none in the way, `"local"` for a local branch (no rules read).
-  `local` (optional): `true` when the branch lives in this clone only until its final PR: no sub-PRs, no CI per item, `merge.sh` merges accepted worker branches locally ([integrations](integrations.md), "Local integration branch"). Item `integration`:
+  `local` (optional): `true` when the branch lives in this clone only until its final PR: no sub-PRs, no CI per item, `merge.sh` merges accepted worker branches locally ([integrations](integrations.md), "Local integration branch").
+  `parent` (optional, with `local: true`): a local chain branch's GitHub integration (`chains.sh accept` on a
+  local chain offer; [integrations](integrations.md), "Local chain branch"). Its `<F>-integrate` item has
+  `integration` the parent, so the chain lands as one sub-PR the merge gate merges; a dependency on a chain
+  item is met outside the chain only once the chain's `state` is `merged`. Item `integration`:
   an integration's `id`, `dropped` (optional, with state `skipped`): the user dropped it so its
   integration can finish; `epic` (optional): `{id, title, url}` of the parent issue an epic run imported; the final PR links it; `integrates`: on the synthetic `<F>-integrate` item `integrate.sh add`
   creates (no `integration`; targets the default branch, starts on integration `<F>`'s branch), or `null`/absent for an item targeting the default branch. An item's
   **target** is its integration's `branch`, else the default branch; one run may mix both.
+- `cloud` (optional): `true` when the run's workspaces are cloud ones, which cannot reach this clone's
+  branches. The coordinator sets it (`jq '.cloud = true' | plan.sh write`) before the go when the user
+  asks for cloud workspaces; `chains.sh` and `epic.sh` then refuse `--local` and offer no local chain branch.
 - `pageId`: the run-summary page, once published; later [reporting](../paradev/loop.md#reporting) (`summary.sh`) pass
   it as `--page` to add a version.
 - `ask`: a free-text task's slice of the user's request, verbatim: the task and its whole scope

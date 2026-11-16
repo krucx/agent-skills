@@ -457,16 +457,23 @@ flush
 squash_only=$(jq -r '(((.repo | objects | .mergeMethods) // .mergeMethods // []) == ["squash"])' <<<"$P")
 
 next_startable() { # "<id>\t<base>" of the first queued item whose dependencies allow a start, else nothing
+  # A done dependency on a local chain branch is met inside its chain; anywhere else only once the
+  # chain has merged into its parent (its <F>-integrate PR), not just into the chain branch. An item
+  # on a local branch never stacks on a PR: it waits for the merge.
   jq -r --argjson squash "$squash_only" --arg tried "$1" '
+    def landed($p; $dep; $it): ($dep.integration // null) as $c
+      | $c == null or $c == ($it.integration // null)
+        or any(($p.integrations // [])[]; .id == $c and ((.parent // null) == null or .state == "merged"));
     . as $p | ($p.maxParallel // 5) as $max
     | ([.items[] | select(.state == "in-progress")] | length) as $running
     | if $running >= $max then empty else
       [.items[] | . as $it
        | select($it.state == "queued" and $it.reason == null and (($tried | split(" ")) | index($it.id) | not))
        | [($it.dependsOn // [])[] | . as $d | ([$p.items[] | select(.id == $d)][0]) as $dep
-          | if $dep == null or $dep.state == "done" then "met"
+          | if $dep == null or ($dep.state == "done" and landed($p; $dep; $it)) then "met"
             elif $dep.pr != null and ($dep.state == "in-review" or $dep.state == "accepting" or $dep.state == "in-progress")
-                 and ($squash | not) then "stack:\($dep.branch)"
+                 and ($squash | not) and (any(($p.integrations // [])[]; .id == $it.integration and (.local // false)) | not)
+            then "stack:\($dep.branch)"
             else "wait" end] as $v
        | select(($v | index("wait") | not) and ([$v[] | select(startswith("stack:"))] | length) <= 1)
        | [$it.id, ([$v[] | select(startswith("stack:")) | sub("^stack:"; "")][0] // "")] | @tsv][0] // empty end' <<<"$P"

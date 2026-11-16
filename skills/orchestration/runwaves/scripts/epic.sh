@@ -40,7 +40,7 @@ case ${1:-} in
   fetch) fetch "$2" "${3:-}" ;;
   import)
     plan=$2 epic=$3
-    islocal=false; [[ ${4:-} != --local ]] || islocal=true
+    islocal=false; [[ ${4:-} != --local ]] || { islocal=true; no_cloud "$plan"; }
     data=$(fetch "$epic" "$plan")
     tmp=$(mktemp "${TMPDIR:-/tmp}/epic.XXXXXX")
     trap 'rm -f "$tmp"' EXIT

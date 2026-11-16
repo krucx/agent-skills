@@ -1491,6 +1491,168 @@ plan_with "[]"
 "$scripts/epic.sh" import "$plan" 400 --local >/dev/null
 expect "epic: import --local marks the integration local" "$(jq -c '.integrations[0].local' "$plan")" true
 
+# --- local chain branches: critical-path chains inside a GitHub integration -------------------
+gh_integ='{"integrations": [{"id": "F1", "title": "CSV", "branch": "feature/csv", "base": "main", "pr": null, "state": "open"}]}'
+sandbox
+plan_with "[$(chain_item '#1' 'Parse rows' '[]' F1), $(chain_item '#2' 'Map columns' '["#1"]' F1), $(chain_item '#3' 'Write file' '["#2"]' F1),
+  $(chain_item '#5' 'Docs' '[]' F1), $(chain_item '#6' 'Docs example' '["#5"]' F1), $(chain_item '#9' 'Lone' '[]' F1)]" "$gh_integ"
+out=$("$scripts/chains.sh" offer "$plan")
+expect "local chain: a critical chain on a GitHub integration is offered" "$out" '"items":["#1","#2","#3"]'
+expect "local chain: on a local branch into the integration branch" "$out" '"branch":"chain/1-parse-rows","parent":"F1"'
+expect "local chain: the question names the one PR" "$out" 'run #1, #2, #3 on the local branch chain/1-parse-rows, one PR into feature/csv?'
+expect_not "local chain: a chain off the critical path is not offered" "$out" '#5'
+expect_not "local chain: nor a lone item" "$out" '#9'
+expect "local chain: accept adds a local integration under F1" "$("$scripts/chains.sh" accept "$plan" '#2')" "added F2 chain/1-parse-rows (local, into feature/csv): #1, #2, #3"
+expect "local chain: based on the parent's branch" "$(jq -c '.integrations[1] | [.id, .branch, .base, .parent, .local, .state]' "$plan")" \
+  '["F2","chain/1-parse-rows","feature/csv","F1",true,"open"]'
+expect "local chain: its items move to it" "$(jq -c '[.items[] | [.id, .integration]]' "$plan")" \
+  '[["#1","F2"],["#2","F2"],["#3","F2"],["#5","F1"],["#6","F1"],["#9","F1"]]'
+expect "local chain: an accepted chain is not offered again" "$("$scripts/chains.sh" offer "$plan")" ""
+expect "local chain: accept refuses an item on no offered chain" "$("$scripts/chains.sh" accept "$plan" '#6' 2>&1)" "#6 is in no offered chain"
+# a local integration has no sub-PRs already: nothing to offer
+jq '.integrations = [.integrations[0] | .local = true] | .items |= map(.integration = "F1")' "$plan" >"$plan.t" && mv "$plan.t" "$plan"
+expect "local chain: none inside a local integration" "$("$scripts/chains.sh" offer "$plan")" ""
+# a diamond splits at its fork and join: each side is its own chain, the join waits for both
+sandbox
+plan_with "[$(chain_item '#1' 'Root' '[]' F1), $(chain_item '#2' 'Left a' '["#1"]' F1), $(chain_item '#3' 'Left b' '["#2"]' F1),
+  $(chain_item '#4' 'Right a' '["#1"]' F1), $(chain_item '#5' 'Right b' '["#4"]' F1), $(chain_item '#6' 'Join' '["#3","#5"]' F1)]" "$gh_integ"
+out=$("$scripts/chains.sh" offer "$plan")
+expect "local chain: a diamond offers its left side" "$out" '"items":["#2","#3"]'
+expect "local chain: and its right side" "$out" '"items":["#4","#5"]'
+expect "local chain: not the fork or the join" "$(wc -l <<<"$out" | tr -d ' ')" 2
+# cloud workspaces cannot reach this clone's branches: refused
+jq '.cloud = true' "$plan" >"$plan.t" && mv "$plan.t" "$plan"
+expect "local chain: nothing offered with cloud workspaces" "$("$scripts/chains.sh" offer "$plan")" ""
+expect "local chain: accept refuses with cloud workspaces" "$("$scripts/chains.sh" accept "$plan" '#2' 2>&1)" "local branches need workers on this machine"
+expect_exit "local chain: and exits 1" "$("$scripts/chains.sh" accept "$plan" '#2' >/dev/null 2>&1; echo $?)" 1
+expect "local chain: --local refused too" "$("$scripts/chains.sh" share "$plan" csv --local 2>&1)" "local branches need workers on this machine"
+expect "local chain: an epic's --local refused too" "$("$scripts/epic.sh" import "$plan" 400 --local 2>&1)" "local branches need workers on this machine"
+
+# integrate.sh: a chain lands on its parent through one <F>-integrate sub-PR; the parent waits for it
+chain_integ='{"integrations": [{"id": "F1", "title": "CSV", "branch": "feature/csv", "base": "main", "pr": null, "state": "open"},
+  {"id": "F2", "title": "Parse rows", "branch": "chain/1-parse-rows", "base": "feature/csv", "parent": "F1", "pr": null, "state": "open", "local": true}]}'
+chain_plan() { # chain_plan <state of #1> <state of #2> <state of #9>: #1 <- #2 on chain F2, #9 straight on F1
+  plan_with "[$(jq -nc --arg s "$1" '{id: "#1", title: "Parse rows", state: $s, integration: "F2", branch: "b-1", skill: "implement", agent: "claude"}'),
+    $(jq -nc --arg s "$2" '{id: "#2", title: "Map columns", state: $s, integration: "F2", dependsOn: ["#1"], branch: "b-2"}'),
+    $(jq -nc --arg s "$3" '{id: "#9", title: "Lone", state: $s, integration: "F1", pr: "https://github.com/acme/app/pull/7"}')]" "$chain_integ"
+}
+sandbox
+chain_plan done in-review done
+out=$(integ check)
+expect "chain integrate: an open chain keeps its parent open" "$out" "open F1: F2"
+expect "chain integrate: the chain itself is open" "$out" "open F2: #2"
+chain_plan done done done
+expect "chain integrate: a finished chain is ready" "$(integ check)" "ready F2"
+expect_not "chain integrate: its parent is not ready before the chain lands" "$(integ check)" "ready F1"
+expect "chain integrate: add queues the chain's item" "$(integ add F2)" "added F2-integrate"
+expect "chain integrate: the item is a sub-PR of the parent" \
+  "$(jq -c '.items[] | select(.id == "F2-integrate") | [.state, .integrates, .integration]' "$plan")" '["queued","F2","F1"]'
+expect "chain integrate: the parent waits for it" "$(integ check)" "open F1: F2-integrate"
+jq '(.items[] | select(.id == "F2-integrate")).state = "done" | .integrations[1].state = "merged"' "$plan" >"$plan.t" && mv "$plan.t" "$plan"
+expect "chain integrate: once it merges the parent is ready" "$(integ check)" "ready F1"
+expect "chain integrate: the parent's final item is not a chain's" "$(integ add F1 && jq -c '.items[] | select(.id == "F1-integrate") | .integration' "$plan")" "null"
+chain_plan done blocked done
+out=$(integ check)
+expect "chain integrate: a held chain is held" "$out" "held F2: #2 blocked"
+expect "chain integrate: and holds its parent" "$out" "held F1: F2"
+chain_plan skipped skipped done
+jq '.items[0].dropped = true | .items[1].dropped = true' "$plan" >"$plan.t" && mv "$plan.t" "$plan"
+out=$(integ check)
+expect "chain integrate: an all-dropped chain is empty" "$out" "empty F2"
+expect "chain integrate: and releases its parent" "$out" "ready F1"
+
+# dispatch: a chain item starts on the local chain branch, cut from the parent's branch on origin
+dispatch_sandbox
+git push -q origin HEAD:refs/heads/main
+chain_plan queued queued queued
+out=$("$scripts/dispatch.sh" proj "$plan" '#1' 2>&1)
+expect "chain dispatch: dispatches" "$out" "dispatched #1 -> "
+expect "chain dispatch: the parent branch is created on origin" "$(git ls-remote --heads origin feature/csv | wc -l | tr -d ' ')" 1
+expect "chain dispatch: the chain branch is in this clone" "$(git show-ref --verify --quiet refs/heads/chain/1-parse-rows && echo yes)" yes
+expect "chain dispatch: and not on origin" "$(git ls-remote --heads origin chain/1-parse-rows)" ""
+args=$(cat "$FIX/create.args")
+expect "chain dispatch: starts from the chain branch" "$args" $'--base-branch\nchain/1-parse-rows'
+expect "chain dispatch: the worker opens no PR" "$args" "open no PR and push nothing"
+# the chain's integrate worker pushes it and opens one PR into the parent, which the gate merges
+dispatch_sandbox
+git push -q origin HEAD:refs/heads/main
+chain_plan done done queued
+git branch -q chain/1-parse-rows
+"$scripts/integrate.sh" add "$plan" F2 >/dev/null
+out=$("$scripts/dispatch.sh" proj "$plan" F2-integrate 2>&1)
+expect "chain integrate dispatch: dispatches" "$out" "dispatched F2-integrate -> "
+args=$(cat "$FIX/create.args")
+expect "chain integrate dispatch: starts from the chain branch" "$args" $'--base-branch\nchain/1-parse-rows'
+expect "chain integrate dispatch: pushes the chain branch" "$args" "git push origin HEAD:chain/1-parse-rows"
+expect "chain integrate dispatch: opens chain to parent" "$args" "gh pr create --base feature/csv --head chain/1-parse-rows"
+expect "chain integrate dispatch: lists the chain's tasks" "$args" "#2 Map columns"
+expect "chain integrate dispatch: the orchestrator merges it" "$args" "the orchestrator merges it into feature/csv once its checks pass"
+expect_not "chain integrate dispatch: not left to the user" "$args" "the user reviews and merges it"
+expect "chain integrate dispatch: waits for its checks" "$args" "ORCHESTRATOR_WORKER_DONE while a check is pending or red"
+expect "chain integrate dispatch: the parent stays on origin" "$(git show-ref --verify --quiet refs/heads/feature/csv || echo none)" none
+
+# merge.sh: a chain item merges into its chain branch in this clone; a conflict waits, a red run is not merged
+local_sandbox "local: npm test passed"
+jq --argjson i "$(jq -c .integrations <<<"$chain_integ")" '.integrations = $i | .items[0].integration = "F2"' "$plan" >"$plan.t" && mv "$plan.t" "$plan"
+git branch -q chain/1-parse-rows main
+expect "chain gate run: merges into the chain branch" "$(gate run)" "merged b-30 into chain/1-parse-rows"
+expect "chain gate run: never gh pr merge" "$(cat "$FIX/merge.args" 2>/dev/null)" ""
+expect "chain gate run: the parent branch is untouched" "$(git merge-base --is-ancestor b-30 feature/csv || echo untouched)" untouched
+local_sandbox "local: npm test failed"
+jq --argjson i "$(jq -c .integrations <<<"$chain_integ")" '.integrations = $i | .items[0].integration = "F2"' "$plan" >"$plan.t" && mv "$plan.t" "$plan"
+git branch -q chain/1-parse-rows main
+expect "chain gate: a red local run is not merged" "$(gate)" "followup:"
+local_sandbox "local: npm test passed"
+jq --argjson i "$(jq -c .integrations <<<"$chain_integ")" '.integrations = $i | .items[0].integration = "F2"' "$plan" >"$plan.t" && mv "$plan.t" "$plan"
+git checkout -q -b chain/1-parse-rows main && echo two >f && git add f && git commit -q -m two && git checkout -q b-30
+expect "chain gate run: a conflict waits" "$(gate run)" "wait: b-30 conflicts with chain/1-parse-rows"
+
+# cycle.sh: each chain's PR into the parent stands alone; a join across chains waits for both to land
+two_chains='{"maxParallel": 5, "integrations": [{"id": "F1", "title": "CSV", "branch": "feature/csv", "base": "main", "pr": null, "state": "open"},
+  {"id": "F2", "title": "Left", "branch": "chain/2-left", "base": "feature/csv", "parent": "F1", "pr": null, "state": "open", "local": true},
+  {"id": "F3", "title": "Right", "branch": "chain/4-right", "base": "feature/csv", "parent": "F1", "pr": null, "state": "open", "local": true}]}'
+chain_cycle_sandbox() { # #2 <- #3 on F2 and #4 <- #5 on F3 done; F2-integrate (PR 11) and F3-integrate (PR 12) in review; #6 joins
+  dispatch_sandbox
+  git push -q origin HEAD:refs/heads/main HEAD:refs/heads/feature/csv
+  plan_with "[$(jq -nc '{id: "#2", state: "done", integration: "F2"}'), $(jq -nc '{id: "#3", state: "done", integration: "F2", dependsOn: ["#2"]}'),
+    $(jq -nc '{id: "#4", state: "done", integration: "F3"}'), $(jq -nc '{id: "#5", state: "done", integration: "F3", dependsOn: ["#4"]}'),
+    $(item F2-integrate in-review w11 t11 | jq -c '. + {integrates: "F2", integration: "F1", pr: "https://github.com/acme/app/pull/11", checked: "3/3 green", acceptance: "ok"}'),
+    $(item F3-integrate in-review w12 t12 | jq -c '. + {integrates: "F3", integration: "F1", pr: "https://github.com/acme/app/pull/12", checked: "3/3 green", acceptance: "ok"}'),
+    $(jq -nc '{id: "#6", title: "Join", state: "queued", integration: "F1", dependsOn: ["#3", "#5"], skill: "implement", agent: "claude"}')]" "$two_chains"
+  ws w11 b-F2-integrate "In Review"; ws w12 b-F3-integrate "In Review"; snap w11:t11:idle w12:t12:idle
+  jq -n '[{headRefName: "b-F2-integrate", number: 11, url: "https://github.com/acme/app/pull/11", state: "OPEN", isDraft: false},
+    {headRefName: "b-F3-integrate", number: 12, url: "https://github.com/acme/app/pull/12", state: "OPEN", isDraft: false}]' >"$FIX/prs.json"
+  pr_view OPEN feature/csv MERGEABLE '[{"name":"ci","conclusion":"SUCCESS"}]'; mv "$FIX/pr-view.json" "$FIX/pr-view-11.json"
+  pr_view OPEN feature/csv MERGEABLE '[{"name":"ci","conclusion":"FAILURE"}]'; mv "$FIX/pr-view.json" "$FIX/pr-view-12.json"
+}
+chain_cycle_sandbox; cyc
+expect "chain cycle: the green chain PR merges into the parent" "$(pf .state F2-integrate) $(cat "$FIX/merge.args")" "done pr merge 11 --merge"
+expect "chain cycle: and its chain is merged" "$(jq -r '.integrations[1].state' "$plan")" merged
+expect "chain cycle: the red chain PR waits on its own chain" "$(pf .state F3-integrate) $(jq -r '.integrations[2].state' "$plan")" "in-review open"
+expect "chain cycle: the join waits for every chain it needs" "$(pf .state '#6')" queued
+pr_view OPEN feature/csv MERGEABLE '[{"name":"ci","conclusion":"SUCCESS"}]'; mv "$FIX/pr-view.json" "$FIX/pr-view-12.json"
+cyc
+expect "chain cycle: the fixed chain PR merges" "$(pf .state F3-integrate) $(jq -r '.integrations[2].state' "$plan")" "done merged"
+expect "chain cycle: then the join dispatches" "$(pf .state '#6')" in-progress
+# inside its own chain a done item is enough: the next link starts on the chain branch at once
+chain_cycle_sandbox
+jq '.items |= map(if .id == "#3" then .state = "queued" | .title = "Left b" | .skill = "implement" | .agent = "claude" else . end)
+  | .items |= map(select(.id != "F2-integrate"))' "$plan" >"$plan.t" && mv "$plan.t" "$plan"
+cyc
+expect "chain cycle: the next link in a chain starts" "$(pf .state '#3')" in-progress
+
+# a chain item never stacks on an unmerged sub-PR of its parent: it waits for the merge
+chain_cycle_sandbox
+jq '.items |= map(if .id == "#2" then .state = "queued" | .title = "Left a" | .skill = "implement" | .agent = "claude" | .dependsOn = ["#8"] else . end)
+  | .items += [{id: "#8", state: "in-review", integration: "F1", branch: "b-8", pr: "https://github.com/acme/app/pull/8"}]
+  | .items |= map(select(.id != "F2-integrate" and .id != "F3-integrate"))' "$plan" >"$plan.t" && mv "$plan.t" "$plan"
+echo '[]' >"$FIX/prs.json"; cyc
+expect "chain cycle: a chain item does not stack on a sub-PR" "$(pf .state '#2')" queued
+# the chain's integrate row shows once, in the chain's group
+chain_cycle_sandbox
+out=$("$scripts/table.sh" proj "$plan" 2>&1)
+expect "chain table: the chain's integrate row shows once" "$(grep -c '^| F2-integrate ' <<<"$out")" 1
+
 # --- wait-change noise filter + watch.sh -------------------------------------------------------
 noise_sandbox() { # #1 in-review idle, #2 in-progress working; events carry #2's dispatch <age> seconds ago
   dispatch_sandbox
