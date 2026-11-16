@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Import an epic's sub-issues as one integration named after the epic ("orchestrate feature #400").
+# Import an epic's sub-issues as one integration named after the epic ("runwaves feature #400").
 #
 # Usage: epic.sh fetch  <epic-number> [plan-file]   JSON: {epic, items: [...], dropped: [...]}
 #        epic.sh import <plan-file> <epic-number> [--local]

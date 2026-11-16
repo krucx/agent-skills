@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  orchestrator-scripts:
+  runwaves-scripts:
     strategy:
       fail-fast: false
       matrix:
@@ -25,4 +25,4 @@ jobs:
           ${{ matrix.bash }} --version | head -n 1
           jq --version
       - name: Run tests
-        run: ${{ matrix.bash }} skills/orchestrator/scripts/test/run.sh
+        run: ${{ matrix.bash }} skills/orchestration/runwaves/scripts/test/run.sh

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Link every skill in this repo into the directories agent harnesses read:
-#   ~/.agents/skills/<name>  -> <repo>/skills/<name>   (Codex, Gemini CLI, Hermes via config)
+#   ~/.agents/skills/<name>  -> <repo>/skills/[<group>/]<name>   (Codex, Gemini CLI, Hermes via config)
 #   ~/.claude/skills/<name>  -> ~/.agents/skills/<name> (Claude Code)
 # An existing real folder at a target is moved to ~/.agents/skill-backups/, never overwritten.
 # Backups live outside the skill folders so harnesses don't load them as extra skills.
@@ -27,7 +27,15 @@ link() {
   echo "linked $target -> $source"
 }
 
-for skill in "$repo"/skills/*/; do
+# A skill is a folder holding SKILL.md, directly under skills/ or one level down in a group folder.
+# Skills install by their own folder name; the group name is not part of it.
+# The skill that was called "orchestrator" is now "runwaves"; drop a link or copy left from before.
+for old in "$HOME/.agents/skills/orchestrator" "$HOME/.claude/skills/orchestrator"; do
+  [[ -L "$old" ]] && rm "$old" && echo "removed stale link $old"
+done
+
+for skill in "$repo"/skills/*/ "$repo"/skills/*/*/; do
+  [[ -f "$skill/SKILL.md" ]] || continue
   name=$(basename "$skill")
   link "${skill%/}" "$HOME/.agents/skills/$name"
   link "$HOME/.agents/skills/$name" "$HOME/.claude/skills/$name"

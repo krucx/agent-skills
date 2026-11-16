@@ -6,7 +6,7 @@ Usage (run with -I; standard library only):
   usage.py --run <runId> [--repo-dir DIR] [--projects-dir DIR] [--plans-dir DIR]
 
 A turn is one assistant transcript line that carries token usage (the convention of the Nov 2026
-baseline in Documentation/review-pass-1/orchestrator-pass-plan.md). Peak context is the largest
+baseline in Documentation/review-pass-1/runwaves-pass-plan.md). Peak context is the largest
 input of any turn (input + cache-read + cache-write tokens). Tool calls are counted once per
 tool_use id: plan.sh, cycle.sh, watch.sh, other Bash, other tools; "chat-only" counts non-empty
 assistant text turns with no tool call. "hand plan writes" counts Bash calls that pipe jq into `plan.sh write`, which

@@ -18,7 +18,7 @@ heartbeat. `preflight.sh` runs `plan.sh claim` and reports it:
 
 Report back with `plan.sh check`: `mine`/`finished` → normal; `stale` → `claim --takeover` (say
 so); `other` → the table only, naming the `owner`. Report back never starts, messages or nudges
-workers, and ends with a line or two on what needs the user; ready items: "say 'orchestrator
+workers, and ends with a line or two on what needs the user; ready items: "say 'runwaves
 continue' to start them".
 
 **Continue** reuses the plan's `autoOnly` and group map and never re-asks them. A `waiting`
