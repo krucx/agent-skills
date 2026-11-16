@@ -9,6 +9,9 @@
 # repo's default branch. A missing integration branch is created on the remote from its base.
 # An <F>-integrate item (integrate.sh; "integrates": "<F>") starts on the integration branch and
 # targets the default branch: its worker merges the default branch in and opens the feature PR.
+# A local chain branch (`parent` on a local integration) is cut here from its parent's branch,
+# which is created on the remote first when missing; its <F>-integrate item targets the parent's
+# branch, and its PR is one the merge gate merges, not the user.
 #   --preset  agent instance or preset id to start (default: the item's "agent")
 # A local integration (`local: true` on the integration) lives in this clone only: the branch is
 # created here from its base and never pushed, there are no sub-PRs and no CI per item; the worker
@@ -59,8 +62,9 @@ agent=$(item '.agent // "claude"')
 run=$(jq -r '.runId' "$plan")
 [[ -n $preset ]] || preset=$agent
 default_base=$(default_branch)
-# The target: where the item's PR goes. Integrations never nest, so a base is a default branch.
-ilocal=false integ=$(item '.integration // ""')
+# The target: where the item's PR goes. Only a local chain branch nests: its base is its parent's
+# branch, on origin; any other integration's base is the default branch.
+ilocal=false iparent='' integrated_parent='' integ=$(item '.integration // ""')
 target=$(plan_jq '. as $p | [.items[] | select(.id == $id)][0] | target($p.integrations; $base) // empty' \
   "$plan" -r --arg id "$id" --arg base "$default_base")
 if [[ -n $integ ]]; then
@@ -68,12 +72,15 @@ if [[ -n $integ ]]; then
   ibase=$(jq -r --arg i "$integ" '[.integrations[] | select(.id == $i) | .base][0] // empty' "$plan")
   ibase=${ibase:-$default_base}
   ilocal=$(jq -r --arg i "$integ" '[.integrations[] | select(.id == $i) | .local // false][0]' "$plan")
+  iparent=$(jq -r --arg i "$integ" '[.integrations[] | select(.id == $i) | .parent // empty][0] // empty' "$plan")
 fi
+target_local=$ilocal  # an <F>-integrate item's ilocal becomes the integrated branch's below
 integrates=$(item '.integrates // ""')
 if [[ -n $integrates ]]; then
   ibranch=$(jq -r --arg i "$integrates" '[.integrations[]? | select(.id == $i) | .branch][0] // empty' "$plan")
   [[ -n $ibranch ]] || fail preflight "item $id integrates $integrates, not in the plan"
   ilocal=$(jq -r --arg i "$integrates" '[.integrations[] | select(.id == $i) | .local // false][0]' "$plan")
+  integrated_parent=$(jq -r --arg i "$integrates" '[.integrations[] | select(.id == $i) | .parent // empty][0] // empty' "$plan")
   base=${base:-$ibranch}
   task='the integration job below'
 fi
@@ -82,19 +89,24 @@ stacked=''
 [[ $base == "$target" || -n $integrates ]] || stacked=1
 
 # --- 0. integration branch ------------------------------------------------------------------
+on_origin() { # on_origin <branch> <base>: create the branch on origin from its base when missing
+  local out
+  out=$(git ls-remote --heads origin "$1") || fail integration "git ls-remote failed"
+  if [[ -z $out ]]; then
+    git fetch -q origin "$2" >"$tmp/err" 2>&1 && git push -q origin "FETCH_HEAD:refs/heads/$1" >>"$tmp/err" 2>&1 ||
+      fail integration "cannot create $1 from $2: $(cat "$tmp/err")"
+  fi
+}
 if [[ $target != "$default_base" ]]; then
-  if [[ $ilocal == true ]]; then
-    # local: in this clone from its base, never on origin
+  if [[ $target_local == true ]]; then
+    # local: in this clone from its base, never on origin; a chain's base is its parent's branch
+    [[ -z $iparent ]] || on_origin "$ibase" "$(jq -r --arg i "$iparent" '[.integrations[] | select(.id == $i) | .base][0] // empty' "$plan")"
     if ! git show-ref --verify --quiet "refs/heads/$target"; then
       git fetch -q origin "$ibase" >"$tmp/err" 2>&1 && git branch -q "$target" FETCH_HEAD >>"$tmp/err" 2>&1 ||
         fail integration "cannot create local $target from $ibase: $(cat "$tmp/err")"
     fi
   else
-    out=$(git ls-remote --heads origin "$target") || fail integration "git ls-remote failed"
-    if [[ -z $out ]]; then
-      git fetch -q origin "$ibase" >"$tmp/err" 2>&1 && git push -q origin "FETCH_HEAD:refs/heads/$target" >>"$tmp/err" 2>&1 ||
-        fail integration "cannot create $target from $ibase: $(cat "$tmp/err")"
-    fi
+    on_origin "$target" "$ibase"
   fi
 fi
 
@@ -173,8 +185,10 @@ others=$(jq -r --arg id "$id" '[.items[] | select(.id != $id) | .id] | join(", "
       "- Open $ibranch -> $target (\`gh pr create --base $target --head $ibranch\`), its description listing every" \
       "  item above (with its PR where there is one) and linking the epic or issues they close (\`Closes #n\`)${epic:+, and the epic $epic}. Then run the full CI" \
       "  (the PR's checks; none: the local run counts). Push to $ibranch only for the merge and fixes." \
-      "- Main is synced only here: don't merge $target into the feature branch at any other time." \
-      "  Do not merge the final PR; the user reviews and merges it." ""
+      "- $target is synced only here: don't merge it into $ibranch at any other time."
+    if [[ -n $integrated_parent ]]; then
+      printf '%s\n' "  Do not merge the PR yourself: the orchestrator merges it into $target once its checks pass." ""
+    else printf '%s\n' "  Do not merge the final PR; the user reviews and merges it." ""; fi
   fi
   printf '%s\n' "- Stay within $id; no drive-by changes elsewhere (other branches are editing this code too)." \
     "- Keep shared machine resources apart: put $branch in Docker Compose project names, container" \

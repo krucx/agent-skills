@@ -58,7 +58,7 @@ jq -r '
         else ([$integs[] | select(.id == $it.integration)][0]) as $f
           | .seen += [$f.id]
           | .out += [head($f)]
-            + [$items[] | select(.integration == $f.id) | itemrow]
+            + [$items[] | select(.integration == $f.id and .integrates == null) | itemrow]
             + [$items[] | select(.integrates == $f.id) | itemrow]
         end
       else .out += [$it | itemrow] end) | .out) as $rows

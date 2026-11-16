@@ -44,7 +44,8 @@ unless there is an integration, a chain, an auto-only harness or regular-preset 
 orca and fanout dispatch at once). Then ask **once, all at once**: where independents go (`main` or
 `feature/<slug>`); each chain (`chains.sh offer`/`accept`, or `share` if independents share a
 branch); per integration branch **local** (`--local`, `"local": true`: no sub-PRs or per-item CI,
-`merge.sh` merges here) or GitHub; auto-only; regular-preset items
+`merge.sh` merges here) or GitHub; each local chain branch `offer` proposes inside a GitHub
+integration (critical-path chains: one PR into it per chain); auto-only; regular-preset items
 ([approval](references/approval.md)). Apply per-item moves and reshow the table. Ask instead on a
 cycle or two items that may be one PR.
 

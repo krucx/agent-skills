@@ -3,7 +3,8 @@
 Load when a run has an epic, `feature:`, a dependency chain, or an integration needing a decision.
 
 An item's **target** is its integration's `branch`, else the default branch; a run may mix both.
-Integrations are **never nested**: an integration's `base` is the default branch.
+Integrations are **never nested**, except a [local chain branch](#local-chain-branch-opt-in-at-the-go)
+inside a GitHub integration: every other integration's `base` is the default branch.
 
 ## Where integrations come from
 
@@ -49,7 +50,37 @@ scripts:
   usual; its CI is the run's only CI.
 
 Workers must be on this machine's host (the branches live in this clone): never pair a local
-integration with cloud workspaces.
+integration with cloud workspaces (`cloud: true` in the plan makes `chains.sh` and `epic.sh` refuse `--local`).
+
+## Local chain branch (opt-in at the go)
+
+Inside a GitHub integration, a sequential chain still waits for a sub-PR and its CI on every link.
+CI on items off the critical path overlaps with other work; on the critical path it is the wait. So
+for each chain of two or more queued items on the critical path, linked one to one (each the only
+dependency of the next, the next its only dependent; a fork or a join ends a chain), `chains.sh
+offer` also prints `{"items", "branch": "chain/<id>-<slug>", "parent": "F1", "question"}` ("run #2,
+#3 on the local branch chain/2-<slug>, one PR into feature/<slug>?"). Nothing else is offered: not
+a chain off the critical path, not one inside a local integration (it has no sub-PRs already), not
+one that would take every item of its integration (make that integration local instead). Ask in the
+go message with the rest. Yes → `chains.sh accept <plan-file> <ID>` adds a nested integration
+(`parent` the GitHub one, `base` its branch, `local: true`) and moves the chain's items to it:
+
+- Its items run as on a local integration: no sub-PRs, no per-item CI, workers test locally, and
+  `merge.sh` merges each into the chain branch in this clone. A conflict is a `wait` for the worker;
+  a red or missing local test run is the follow-up asking for a passing one.
+- `dispatch.sh` creates the parent branch on origin if missing, and the chain branch here from it.
+- When the chain is done, `integrate.sh` queues its `<F>-integrate` item with `integration` the
+  parent: its worker pushes the chain branch and opens one PR into the parent's branch, and the
+  merge gate merges it when its checks pass, like any sub-PR. A red chain PR holds only that chain;
+  sibling chains and items carry on. After it merges, `cycle.sh` records the chain `merged`.
+- An item outside the chain that depends on a chain item waits until the chain has merged into the
+  parent, not just until that item merged into the chain branch. A diamond's join waits for every
+  chain it joins.
+- The parent stays open (or `held`, when a chain is held) until each chain has landed; an
+  all-dropped chain releases it.
+
+Local only, like a local integration: a plan with `cloud: true` (cloud workspaces cannot reach this
+clone) gets no local chain offers, and `accept` on one, like any `--local`, is refused.
 
 ## Merge gate (script-enforced)
 
