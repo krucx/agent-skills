@@ -32,6 +32,7 @@ while (($#)); do
 done
 
 here=$(cd "$(dirname "$0")" && pwd)
+. "$here/common.sh"
 # superset, paradev and pdev are the same Paradev CLI; use whichever is installed.
 cli=$(command -v superset || command -v paradev || command -v pdev) ||
   { echo "dispatch $id failed at preflight: Paradev CLI not found" >&2; exit 1; }
@@ -57,12 +58,12 @@ skill=$(item '.skill // "implement"')
 agent=$(item '.agent // "claude"')
 run=$(jq -r '.runId' "$plan")
 [[ -n $preset ]] || preset=$agent
-default_base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)
-default_base=${default_base:-main}
+default_base=$(default_branch)
 # The target: where the item's PR goes. Integrations never nest, so a base is a default branch.
-target=$default_base ilocal=false integ=$(item '.integration // ""')
+ilocal=false integ=$(item '.integration // ""')
+target=$(plan_jq '. as $p | [.items[] | select(.id == $id)][0] | target($p.integrations; $base) // empty' \
+  "$plan" -r --arg id "$id" --arg base "$default_base")
 if [[ -n $integ ]]; then
-  target=$(jq -r --arg i "$integ" '[.integrations[]? | select(.id == $i) | .branch][0] // empty' "$plan")
   [[ -n $target ]] || fail preflight "item $id names integration $integ, not in the plan"
   ibase=$(jq -r --arg i "$integ" '[.integrations[] | select(.id == $i) | .base][0] // empty' "$plan")
   ibase=${ibase:-$default_base}

@@ -57,8 +57,9 @@ close" ends a run that still has blocked or waiting items; they're kept as carry
 next run offers to pick them up again. Workspaces are never archived or deleted.
 
 A run follows one loop. `preflight.sh` checks tools, auth, host, project, plan ownership and
-groups in one call. The coordinating agent plans (tracker lookup, free text split into tasks, dependencies,
-waves) and sends one go message with every question at once. Then `watch.sh` runs `cycle.sh`
+groups in one call. The coordinating agent plans (tracker lookup, free text split into tasks, dependencies)
+and sends one go message with every question at once; its plan table comes from `table.sh --go`, which
+works out each item's wave and marks the critical path (every longest dependency chain). Then `watch.sh` runs `cycle.sh`
 (transitions, merge gate, dispatch, tags) without the model and wakes it only with the events since
 the last wake and a `needs` list: an acceptance check to eyeball (`accept`), a worker `question`,
 `blocked`/`dependency-failed`/`held` items for you to decide, or a `stalled` worker. The chat shows

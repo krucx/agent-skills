@@ -2,6 +2,8 @@
 # Offer dependency chains as integration branches at plan approval, and apply the user's answer.
 #
 # Usage: chains.sh offer  <plan-file>                      one JSON line per chain: {"items": [...], "branch": ...}
+#        chains.sh critical <plan-file>                    {"length", "items", "paths", "pathCount"} (planlib.jq)
+#        chains.sh waves    <plan-file>                    {"<ID>": <wave>, ...} under maxParallel (default 5)
 #        chains.sh accept <plan-file> [--local] <ID>...    make the chain containing each ID its own integration
 #        chains.sh share  <plan-file> <slug> [--local]     one feature/<slug> integration for every item
 # --local marks the integration `local: true`: the branch lives in this clone only, with no sub-PRs
@@ -12,11 +14,14 @@
 # run shares one feature branch (share) nothing is left to offer: integrations never nest. The
 # branch is feature/<root id>-<root title slug>, the root being the chain's first item in plan
 # order with no dependency inside it. accept and share write through plan.sh.
+#
+# critical and waves cover the items neither done nor skipped (planlib.jq has the rules); both exit 1
+# on a dependency cycle.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
-default_base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)
-default_base=${default_base:-main}
+. "$here/common.sh"
+default_base=$(default_branch)
 
 # Each chain as {items: [ids in plan order], root: <item>}.
 chains() {
@@ -63,6 +68,10 @@ case ${1:-} in
       jq -c --arg b "$(branch_for "$(jq -r .root <<<"$c")" "$(jq -r .title <<<"$c")")" \
         '{items, branch: $b, question: "group \(.items | join(", ")) into \($b)?"}' <<<"$c"
     done ;;
+  critical)
+    plan_jq 'critical(5)' "$2" -c ;;
+  waves)
+    plan_jq 'waves(.maxParallel // 5; critical(0).items)' "$2" -c ;;
   accept)
     plan=$2
     shift 2
@@ -89,5 +98,5 @@ case ${1:-} in
        | .items |= map(if (.integration // null) == null and (.integrates // null) == null and .state != "skipped"
                        then .integration = $f else . end)'
     echo "added $f feature/$slug" ;;
-  *) echo "usage: chains.sh offer <plan-file> | accept <plan-file> [--local] <ID>... | share <plan-file> <slug> [--local]" >&2; exit 64 ;;
+  *) echo "usage: chains.sh offer <plan-file> | critical <plan-file> | waves <plan-file> | accept <plan-file> [--local] <ID>... | share <plan-file> <slug> [--local]" >&2; exit 64 ;;
 esac

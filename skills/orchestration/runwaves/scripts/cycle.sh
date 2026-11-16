@@ -33,6 +33,7 @@ dry=''
 (($# == 2)) || { sed -n '2,6p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 1; }
 project=$1 plan=$2
 here=$(cd "$(dirname "$0")" && pwd)
+. "$here/common.sh"
 cli=$(command -v superset || command -v paradev || command -v pdev) ||
   { echo "cycle: Paradev CLI not found" >&2; exit 1; }
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/cycle.XXXXXX")
@@ -87,8 +88,7 @@ flush() {
 }
 reload() { [[ -n $dry ]] || P=$(jq -c . "$plan"); }
 
-default_base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)
-default_base=${default_base:-main}
+default_base=$(default_branch)
 
 target_of() { # the item's integration branch, else the default branch
   local integ
