@@ -14,7 +14,7 @@
 ```
 
 - `runId` is derived by `plan.sh write` from `startedAt` at creation, in `YYYYMMDD-HHMM` UTC format;
-  later writes preserve both values. `status`: `active`|`finished`. `state`, `reason`: see SKILL.md;
+  later writes preserve both values. `status`: `active`|`finished`. `state`, `reason`: see paradev/loop.md;
   `cycle.sh` adds the transient state `accepting`
   (a DONE block arrived, `acceptance` `"pending"`; it becomes `in-review` only through `accept.sh`, and does not count against the parallel limit). `plan.sh` adds `owner`,
   `heartbeat`, `takenOverFrom`, `forcedAt`, `carryOver`, and `integrationCarryOver` on close;
@@ -30,10 +30,10 @@
   integration can finish; `epic` (optional): `{id, title, url}` of the parent issue an epic run imported; the final PR links it; `integrates`: on the synthetic `<F>-integrate` item `integrate.sh add`
   creates (no `integration`; targets the default branch, starts on integration `<F>`'s branch), or `null`/absent for an item targeting the default branch. An item's
   **target** is its integration's `branch`, else the default branch; one run may mix both.
-- `pageId`: the run-summary page, once published; later [reporting](../SKILL.md#reporting) (`summary.sh`) pass
+- `pageId`: the run-summary page, once published; later [reporting](../paradev/loop.md#reporting) (`summary.sh`) pass
   it as `--page` to add a version.
 - `ask`: a free-text task's slice of the user's request, verbatim: the task and its whole scope
-  (the [acceptance check](../SKILL.md#acting-on-needs) grades against it alone). `notes`: the
+  (the [acceptance check](../paradev/loop.md#acting-on-needs) grades against it alone). `notes`: the
   coordinator's build notes (context, out of scope), adding no work. `extras`: what it would add
   beyond the `ask`, for the human only (possible follow-ups; never sent to the worker). All three
   `null` for tracker items (the issue body is the user's text). `text`: an older plan's single
@@ -44,8 +44,8 @@
   [preflight](../SKILL.md#planning) found. `autoOnly`: per auto-only
   harness, the user's `"accepted"`/`"declined"` (absent: not asked yet).
 - `checked`: the worker's `checked:` line. `acceptance`: `null`, `"ok"`, or the
-  [gap](../SKILL.md#acting-on-needs). `followUp`: `null` or `{"after": "<ID>", "message": "<text>"}`
-  (sent after a merge by `cycle.sh`; see [the loop](../SKILL.md#the-loop)).
+  [gap](../paradev/loop.md#acting-on-needs). `followUp`: `null` or `{"after": "<ID>", "message": "<text>"}`
+  (sent after a merge by `cycle.sh`; see [the loop](../paradev/loop.md#the-loop)).
 - `events` (top level, optional; older plans lack it): append-only log of what the coordinator and
   its scripts did, so scripts can act without a model turn and nothing happens silently. Entry:
   `{"at": "<ISO-8601 UTC>", "item": "<ID or F1 or null>", "action": "<kind>", "detail": "<one line>"}`.
