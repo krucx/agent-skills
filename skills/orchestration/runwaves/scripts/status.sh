@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Print one JSON object per workspace the orchestrator should know about: every plan workspace,
+# Print one JSON object per workspace the coordinator should know about: every plan workspace,
 # plus every workspace of this project carrying a group tag.
 #
 # Usage: status.sh [--compact] <project-id> [plan-file]   (inside the repo the PRs belong to)
@@ -20,7 +20,7 @@
 #                     item, pr, summary, checked, criteria, reason, needs, waitingOn, resumesWhen}, or null.
 #                     marker "waiting" = a declared wait (busy, not done); a later DONE/BLOCKED
 #                     replaces it; still latest after WAIT_MINUTES (30) it adds "stale": true and
-#                     "staleMinutes", so the orchestrator checks the screen instead of skipping
+#                     "staleMinutes", so the coordinator checks the screen instead of skipping
 #   pr                newest PR for the branch {number,url,state,isDraft}, or null; an open PR
 #                     GitHub calls CONFLICTING adds "conflicting": true and "base" (its base branch)
 #

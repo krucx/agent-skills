@@ -29,9 +29,17 @@ link() {
 
 # A skill is a folder holding SKILL.md, directly under skills/ or one level down in a group folder.
 # Skills install by their own folder name; the group name is not part of it.
-# The skill that was called "orchestrator" is now "runwaves"; drop a link or copy left from before.
+# The skill that was called "orchestrator" is now "runwaves". Drop what an earlier install left:
+# a link into this repo (or on to ~/.agents/skills), or a copy install.ps1 made. Anything else stays.
 for old in "$HOME/.agents/skills/orchestrator" "$HOME/.claude/skills/orchestrator"; do
-  [[ -L "$old" ]] && rm "$old" && echo "removed stale link $old"
+  if [[ -L "$old" ]]; then
+    to=$(readlink "$old")
+    case "$to" in
+      "$repo"/skills/*|"$HOME/.agents/skills/orchestrator") rm "$old"; echo "removed stale link $old" ;;
+    esac
+  elif [[ -f "$old/.agent-skills-install" ]]; then
+    rm -rf "$old"; echo "removed stale copy $old"
+  fi
 done
 
 for skill in "$repo"/skills/*/ "$repo"/skills/*/*/; do

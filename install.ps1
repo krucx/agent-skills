@@ -51,10 +51,16 @@ $skillDirs = foreach ($dir in Get-ChildItem -LiteralPath (Join-Path $repo 'skill
   if (Test-Path -LiteralPath (Join-Path $dir.FullName 'SKILL.md') -PathType Leaf) { $dir }
   else { Get-ChildItem -LiteralPath $dir.FullName -Directory | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') -PathType Leaf } }
 }
-# The skill that was called "orchestrator" is now "runwaves"; drop a copy this installer left before.
+# The skill that was called "orchestrator" is now "runwaves". Drop what an earlier install left:
+# a copy this installer made, or a link install.sh made under WSL or Git Bash. Anything else stays.
 foreach ($root in @($agentsSkills, $claudeSkills)) {
   $old = Join-Path $root 'orchestrator'
-  if (Test-Path -LiteralPath (Join-Path $old $marker) -PathType Leaf) {
+  $found = Get-ChildItem -LiteralPath $root -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq 'orchestrator' }
+  if (-not $found) { continue }
+  if ($found.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+    $found.Delete()
+    Write-Output "removed stale link $old"
+  } elseif (Test-Path -LiteralPath (Join-Path $old $marker) -PathType Leaf) {
     Remove-Item -LiteralPath $old -Recurse -Force
     Write-Output "removed stale copy $old"
   }

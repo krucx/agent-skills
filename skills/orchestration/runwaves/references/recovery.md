@@ -2,7 +2,7 @@
 
 Load when preflight exits 3 or 4, a run is resumed, or the user says "close".
 
-One **active run** per repo, owned by an orchestrator terminal (`$SUPERSET_TERMINAL_ID`) with a
+One **active run** per repo, owned by a coordinator terminal (`$SUPERSET_TERMINAL_ID`) with a
 heartbeat. `preflight.sh` runs `plan.sh claim` and reports it:
 
 - `free`: new plan (a finished run moves to `~/.agents/orchestrator/history/`). Following
