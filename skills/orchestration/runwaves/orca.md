@@ -1,19 +1,30 @@
 # Orca backend
 
-Orca host only (`ORCA_WORKSPACE_ID` is set). Read after the go. Hand the approved waves to Orca's
-built-in `orchestration` skill as they are: no preflight, none of this skill's scripts, plan file
-or groups.
+Orca host only (`ORCA_WORKSPACE_ID` is set). Read after the go. Every run shape (tracker items,
+free text, epics, `feature:`, chains, local branches) runs here with the saved plan and this
+skill's scripts; Orca starts the workers and wakes you. `<skill-dir>` = the folder holding
+SKILL.md; run scripts inside the repo; the project ID is `-`. Never write jq against the plan:
+only the scripts change it.
 
-- Load that skill and its version-matched guide (`orca skills get orchestration`); its CLI, wake
-  and message rules win over anything here.
-- **Where items run**: 1 or 2 items stay in your workspace (`--worktree current`, or your own
-  subagents in the same worktree). 3 or more get one new worktree and workspace each, visible in
-  Orca's sidebar: `orca orchestration worker-start --spec "<brief>" --worktree new-child
-  --name <runId>-<ID> --agent <agent>`; never `--worktree current`.
-- Brief = the item's ref, title and `ask` verbatim, target branch, `using /<skill>` if set, and
-  "open a PR" for tracker items. Agent: `with codex` → `codex`, else the agent you run as.
-- Start every item whose dependencies are met, then end your turn. When Orca wakes you with a
-  `worker_done`, start the items it unblocked; a failed dependency: tell the user, skip nothing alone.
-- Worker questions: show them verbatim, relay only the user's answer with `orchestration send`.
-- "report back": one line per item from Orca's dispatch state. "continue"/"close": Orca keeps no
-  runwaves plan; say so and show the report instead.
+- Load Orca's `orchestration` skill and its guide once (`orca skills get orchestration`) for its
+  wake and reply rules. Never run its `worker-start` yourself: `cycle.sh` starts every worker
+  through `dispatch.sh`, one new child worktree per item on its own branch, visible in Orca's
+  sidebar, and records the dispatch in the plan.
+- **Go**: `plan.sh write <draft>` (from then on `<plan-file>` is `plan.sh path`), the go
+  message's answers (`chains.sh accept|share`, `epic.sh import`, as in
+  [integrations](references/integrations.md)), then `cycle.sh - <plan-file>`. End your turn.
+- **Each Orca wake** (a `worker_done`, a question, an escalation): run `cycle.sh - <plan-file>`
+  once, act on its `needs` as in [loop.md](paradev/loop.md#acting-on-needs), and end your turn.
+  It moves states, merges green sub-PRs into integration branches, queues `<F>-integrate`, and
+  starts what became ready. Never loop it or run `watch.sh`: Orca wakes you.
+- **Questions**: show the worker's question verbatim; relay only the user's answer, with `orca
+  orchestration reply --id <message_id> --body "<answer>"`. Other messages to a worker:
+  `send.sh`.
+- Merges a human makes don't wake you: "continue" runs `cycle.sh` again, which marks merged items
+  done and starts what they unblocked. `stalled` never comes up here; a worker Orca reports gone
+  shows as `blocked`.
+- **report back**: `table.sh - <plan-file>`. **continue**: `plan.sh claim`, then a wake.
+  **close**: `plan.sh close`, then `finish.sh - <plan-file>`.
+- **Finish** (`finished` in the cycle output): `finish.sh - <plan-file>`. No summary page: it
+  publishes to Paradev.
+- Reporting and never-do rules: [loop.md](paradev/loop.md#reporting).

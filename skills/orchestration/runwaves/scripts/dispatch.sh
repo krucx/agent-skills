@@ -3,6 +3,9 @@
 # workspace with the worker prompt, and record workspace, terminal and branch.
 #
 # Usage (inside the repo): dispatch.sh <project-id> <plan-file> <item-id> [--base <branch>] [--preset <id>]
+#   <project-id> is `-` on Orca (common.sh backend): the worker starts with `orca orchestration
+#   worker-start` in a new child worktree on its own branch; the item records the dispatch ID as
+#   its workspace and Orca's terminal handle as its terminal.
 #   --base    start branch (default: the item's target); any other base makes the item stacked
 #
 # The target is the item's integration branch (plan "integrations", item "integration"), else the
@@ -36,8 +39,9 @@ done
 
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/common.sh"
+host=$(backend)
 # superset, paradev and pdev are the same Paradev CLI; use whichever is installed.
-cli=$(command -v superset || command -v paradev || command -v pdev) ||
+[[ $host == orca ]] || cli=$(command -v superset || command -v paradev || command -v pdev) ||
   { echo "dispatch $id failed at preflight: Paradev CLI not found" >&2; exit 1; }
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/dispatch.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
@@ -149,11 +153,15 @@ edit '.state = "in-progress" | .branch = $branch | .reason = null' --arg branch 
   fail plan "$(cat "$tmp/err")"
 
 # --- 3. workspace ---------------------------------------------------------------------------
-tag=$(jq -r '.groups["In Progress"] // empty' "$plan")
-[[ -n $tag ]] || tag=$("$here/groups.sh" "$project" plan "$plan" 2>/dev/null | jq -r '.["In Progress"] // empty' || true)
-tag=${tag:-In Progress}
+if [[ $host != orca ]]; then
+  tag=$(jq -r '.groups["In Progress"] // empty' "$plan")
+  [[ -n $tag ]] || tag=$("$here/groups.sh" "$project" plan "$plan" 2>/dev/null | jq -r '.["In Progress"] // empty' || true)
+  tag=${tag:-In Progress}
+fi
 
-case $agent in
+# On Orca the spec follows Orca's own preamble, so a slash command would not be its first line.
+[[ $host != orca ]] || agent_line=plain
+case ${agent_line:-$agent} in
   claude|hermes|agy|antigravity) first="/$skill $id" ;;
   codex) first="\$$skill $id" ;;
   opencode) first="Use the $skill skill to do $id." ;;  # no skill slash command; verified in cli-surface.md
@@ -166,12 +174,12 @@ others=$(jq -r --arg id "$id" '[.items[] | select(.id != $id) | .id] | join(", "
     printf '%s\n%s\n\n' \
       "The user's words (verbatim; this is the task and the whole of its scope):" "$ask"
     [[ -z $notes ]] || printf '%s\n%s\n\n' \
-      "Orchestrator's notes (context and what stays out of scope; they add no work):" "$notes"
+      "Coordinator's notes (context and what stays out of scope; they add no work):" "$notes"
   else
     [[ -z $text ]] || printf '%s\n\n' "$text"
   fi
-  printf '%s\n' "You're one of several agents, each in its own worktree of this repo, coordinated by an" \
-    "orchestrator; the others work on ${others:-no other items}."
+  printf '%s\n' "You're one of several agents, each in its own worktree of this repo, coordinated by a" \
+    "runwaves coordinator; the others work on ${others:-no other items}."
   [[ -z $task ]] || printf '%s\n' "- $id is a label in this run's plan only, not a tracker ticket; don't fetch it. The task" \
     "  is $task."
   if [[ -n $integrates ]]; then
@@ -187,7 +195,7 @@ others=$(jq -r --arg id "$id" '[.items[] | select(.id != $id) | .id] | join(", "
       "  (the PR's checks; none: the local run counts). Push to $ibranch only for the merge and fixes." \
       "- $target is synced only here: don't merge it into $ibranch at any other time."
     if [[ -n $integrated_parent ]]; then
-      printf '%s\n' "  Do not merge the PR yourself: the orchestrator merges it into $target once its checks pass." ""
+      printf '%s\n' "  Do not merge the PR yourself: the coordinator merges it into $target once its checks pass." ""
     else printf '%s\n' "  Do not merge the final PR; the user reviews and merges it." ""; fi
   fi
   printf '%s\n' "- Stay within $id; no drive-by changes elsewhere (other branches are editing this code too)." \
@@ -203,22 +211,22 @@ others=$(jq -r --arg id "$id" '[.items[] | select(.id != $id) | .id] | join(", "
   fi
   if [[ $ilocal == true && -z $integrates ]]; then
     printf '%s\n' "- $target is a local integration branch (no sub-PRs, no CI per task): open no PR and push nothing." \
-      "  Commit on $branch and leave it there; the orchestrator merges it into $target on this machine, and" \
+      "  Commit on $branch and leave it there; the coordinator merges it into $target on this machine, and" \
       "  CI runs once on the final $target PR. Need a human decision? Ask it plainly and stop."
   else
     printf '%s\n' "- Your goal is an open PR: once committed, push and \`gh pr create --base $target\` yourself, even if your skill" \
       "  stops at a commit. Need a human decision? Ask it plainly and stop."
   fi
   printf '%s\n' "- If you hit the same obstacle a second time (same failing command or missing access), don't" \
-    "  retry: print ORCHESTRATOR_WORKER_BLOCKED, \`reason:\` the obstacle, \`needs:\` what would clear" \
+    "  retry: print RUNWAVES_WORKER_BLOCKED, \`reason:\` the obstacle, \`needs:\` what would clear" \
     "  it, and stop. Once the PR is open, a PR check you cannot fix is not an obstacle: it goes in" \
     "  \`checked:\`." \
     "- Before ending a turn with your own background work running (e.g. code-review subagents), or" \
     "  while waiting on something external that finishes by itself, print this once per wait (not" \
     "  per check, never while actively implementing), the marker on a line of its own:" \
-    "  ORCHESTRATOR_WORKER_WAITING" "  item: $id" "  waiting-on: <what you are waiting for>" \
+    "  RUNWAVES_WORKER_WAITING" "  item: $id" "  waiting-on: <what you are waiting for>" \
     "  resumes-when: <what ends the wait>" \
-    "  Waiting is not blocked: a wait clears on its own, a block needs the orchestrator or a human." \
+    "  Waiting is not blocked: a wait clears on its own, a block needs the coordinator or a human." \
     "  If what you wait on fails or stops, that's an obstacle as above. When the wait ends, carry on" \
     "  and finish with a block below; it replaces the wait."
   if [[ $ilocal == true && -z $integrates ]]; then
@@ -226,10 +234,10 @@ others=$(jq -r --arg id "$id" '[.items[] | select(.id != $id) | .id] | join(", "
       "  command before your last commit; a red test is yours to fix before committing." \
       "- Done means the branch is committed and the full test command passed. In the DONE block put" \
       "  \`pr: none (local integration)\` and in \`checked:\` the exact test command and its result, e.g." \
-      "  \"local: npm test passed\"; the orchestrator merges your branch into $target only on that."
+      "  \"local: npm test passed\"; the coordinator merges your branch into $target only on that."
   else
     printf '%s\n' "- Done means every PR check passed and the PR is mergeable, not just open: never print" \
-      "  ORCHESTRATOR_WORKER_DONE while a check is pending or red. Check cheaply: \`gh pr checks <n>" \
+      "  RUNWAVES_WORKER_DONE while a check is pending or red. Check cheaply: \`gh pr checks <n>" \
       "  --watch --fail-fast >/dev/null 2>&1; echo exit=\$?\` (0 = all passed; the table itself is noise), and" \
       "  only on a non-zero exit \`gh pr checks <n> --json name,state,bucket --jq '.[] | select(.bucket != \"pass\"" \
       "  and .bucket != \"skipping\") | \"\\(.name): \\(.state)\"'\` for the failed names; then tail" \
@@ -240,33 +248,63 @@ others=$(jq -r --arg id "$id" '[.items[] | select(.id != $id) | .id] | join(", "
       "  on a conflict merge or rebase the base and push. A check you cannot fix goes in \`checked:\`" \
       "  by name. If the PR has no checks at all (common on PRs into a feature branch), run the" \
       "  project's test command locally and report it in \`checked:\`, e.g. \"no PR checks; local: npm" \
-      "  test passed\"; the orchestrator merges a PR into an integration branch only on that."
+      "  test passed\"; the coordinator merges a PR into an integration branch only on that."
   fi
   printf '%s\n' "- criteria: the issue's acceptance checklist (for free text, the ask, one criterion per sentence you can" \
     "  check). Report <met>/<total>; when met < total add one indented \`unmet:\` line per criterion not" \
     "  met or not verifiable. No checklist: report n/n over the criteria you derived and list them in" \
     "  \`checked:\`. Omit the \`unmet:\` lines when all are met." \
     "- Finish your last message with exactly one of these, the marker on a line of its own:" \
-    "  ORCHESTRATOR_WORKER_DONE" "  item: $id" "  pr: <url>" "  summary: <one line>" \
+    "  RUNWAVES_WORKER_DONE" "  item: $id" "  pr: <url>" "  summary: <one line>" \
     "  checked: <what you verified against the task, and the PR's checks in a few words (\"5/5" \
     "    green\"); name only the checks that were red or skipped>" \
     "  criteria: <met>/<total>" \
     "  unmet: <a criterion not met or not verifiable, quoted, and why in a few words>" "  or" \
-    "  ORCHESTRATOR_WORKER_BLOCKED" "  item: $id" "  reason: <what stops you>" \
+    "  RUNWAVES_WORKER_BLOCKED" "  item: $id" "  reason: <what stops you>" \
     "  needs: <the decision or access required>"
+  [[ $host != orca ]] || printf '%s\n' \
+    "- Your Orca worker_done report (and any blocked report) must contain that block verbatim."
 } >"$tmp/prompt"
+
+rollback() { # rollback <reason>: undo the in-progress mark; the second failure blocks the item
+  edit '.dispatchFailures = ((.dispatchFailures // 0) + 1)
+        | if .dispatchFailures >= 2 then .state = "blocked" | .reason = $reason
+          else .state = "queued" | .branch = null | .reason = null end' \
+    --arg reason "workspace creation failed: ${1:-unknown error}" >/dev/null 2>"$tmp/err" ||
+    fail rollback "item $id is still in-progress in the plan: $(cat "$tmp/err")"
+  fail workspace "${1:-unknown error} ($(item .state))"
+}
+
+if [[ $host == orca ]]; then
+  case $preset in agy) oagent=antigravity ;; *) oagent=$preset ;; esac
+  if ! orca_cli orchestration worker-start --spec-file "$tmp/prompt" --worktree new-child --name "$branch" \
+    --base-branch "$base" --agent "$oagent" --task-title "$id $(printf '%s' "$title" | cut -c1-50)" \
+    --json </dev/null >"$tmp/created" 2>"$tmp/err"; then
+    reason=$(head -n 1 "$tmp/err" | cut -c1-200)
+    [[ -n $reason ]] || reason=$(jq -r '.. | objects | (.failedStage // .message // empty)' "$tmp/created" 2>/dev/null | head -n 1)
+    rollback "$reason"
+  fi
+  ws=$(jq -r '[.. | objects | .dispatchId? // empty][0] // empty' "$tmp/created")
+  [[ -n $ws ]] || fail record "no dispatch ID in worker-start's receipt; check Orca's worker list"
+  shown=$(orca_cli orchestration worker-show --dispatch "$ws" --json </dev/null 2>/dev/null || echo '{}')
+  term=$(jq -r '.result.terminal // empty' <<<"$shown")
+  # Orca may prefix the worktree's branch name (e.g. "<user>/"): record the branch it really has.
+  wpath=$(jq -r '.result.workspace // "" | sub("^[^:]*::"; "")' <<<"$shown")
+  got=''
+  [[ -z $wpath || ! -d $wpath ]] || got=$(git -C "$wpath" branch --show-current 2>/dev/null || true)
+  edit '.workspace = $ws | .terminal = (if $t == "" then null else $t end) | .branch = (if $b == "" then .branch else $b end)' \
+    --arg ws "$ws" --arg t "$term" --arg b "$got" >/dev/null 2>"$tmp/err" ||
+    fail record "dispatch $ws was started but not recorded: $(cat "$tmp/err")"
+  echo "dispatched $id -> ${got:-$branch} (orca dispatch $ws, terminal ${term:-none})"
+  exit 0
+fi
 
 if ! "$cli" workspaces create --local --project "$project" --name "$id $(printf '%s' "$title" | cut -c1-50)" \
   --branch "$branch" --skip-branch-prefix --base-branch "$base" --tag "$tag" \
   --agent "$preset" --prompt "$(cat "$tmp/prompt")" --json >"$tmp/created" 2>"$tmp/err"; then
   reason=$(head -n 1 "$tmp/err" | cut -c1-200)
   [[ -n $reason ]] || reason=$(head -n 1 "$tmp/created" | cut -c1-200)
-  edit '.dispatchFailures = ((.dispatchFailures // 0) + 1)
-        | if .dispatchFailures >= 2 then .state = "blocked" | .reason = $reason
-          else .state = "queued" | .branch = null | .reason = null end' \
-    --arg reason "workspace creation failed: ${reason:-unknown error}" >/dev/null 2>"$tmp/err" ||
-    fail rollback "item $id is still in-progress in the plan: $(cat "$tmp/err")"
-  fail workspace "${reason:-unknown error} ($(item .state))"
+  rollback "$reason"
 fi
 
 # --- 4. record ------------------------------------------------------------------------------

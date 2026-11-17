@@ -7,7 +7,7 @@
 #                                                  marks the integration `local: true` (no sub-PRs)
 #
 # GitHub sub-issues only (Linear/Jira children: use `superset tasks get`, then add the integration
-# by hand). Dropped like any tracker item: closed, pull requests, already in the plan, labelled
+# to the draft plan before the go). Dropped like any tracker item: closed, pull requests, already in the plan, labelled
 # needs-info or needs-triage; each is listed with its reason. The epic is stored on the integration
 # (`epic`: {id, title, url}) so the final feature -> default PR links it. import writes via plan.sh;
 # the items get the default skill, agent and preset, and no dependencies: set those afterwards.

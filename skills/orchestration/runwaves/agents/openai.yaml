@@ -1,4 +1,4 @@
 interface:
   display_name: "Runwaves"
-  short_description: "Drive tracker issues, an epic (\"feature #400\") or free-text tasks to PRs in parallel Paradev workers, with a resumable plan (not Orca's built-in skills or the superset: multi-agent skill)"
+  short_description: "Drive tracker issues, an epic (\"feature #400\") or free-text tasks to PRs in parallel Orca or Paradev workers, with a resumable plan (not Orca's built-in skills or the superset: multi-agent skill)"
   default_prompt: "Use $runwaves on issues 340-343."

@@ -10,6 +10,7 @@ set -uo pipefail
 test_dir=$(cd "$(dirname "$0")" && pwd)
 scripts=$(dirname "$test_dir")
 export PATH="$test_dir/bin:$PATH" RETRY_DELAY=0 PARADEV_HOST_DB=/nonexistent/host.db
+unset ORCA_TERMINAL_HANDLE ORCA_WORKSPACE_ID ORCA_CLI_COMMAND  # tests pick their backend themselves
 pass=0 fail=0
 
 ok() { pass=$((pass + 1)); echo "ok   $1"; }
@@ -160,7 +161,7 @@ expect "criteria: met" "$out" '"met":4'
 expect "criteria: total" "$out" '"total":5'
 expect "criteria: unmet lines, wrapped one rejoined" "$out" '"unmet":["\"export is streamed\" not verifiable, no large fixture to test with","\"docs updated\" not met, ran out of time"]'
 expect "criteria: compact" "$(status --compact)" "criteria 4/5, 2 unmet"
-printf '%s\n' "ORCHESTRATOR_WORKER_DONE" "item: #16" "pr: https://github.com/acme/app/pull/16" "summary: done" "checked: all" "criteria: 3/3" "" >"$FIX/screens/t16"
+printf '%s\n' "RUNWAVES_WORKER_DONE" "item: #16" "pr: https://github.com/acme/app/pull/16" "summary: done" "checked: all" "criteria: 3/3" "" >"$FIX/screens/t16"
 expect "criteria: all met has no unmet" "$(status)" '"criteria":{"met":3,"total":3,"unmet":[]}'
 expect "criteria: all met compact" "$(status --compact)" "criteria 3/3"
 expect_not "criteria: all met compact has no unmet count" "$(status --compact)" "unmet"
@@ -463,11 +464,11 @@ expect "dispatch: prompt starts with the skill" "$args" "/implement #20"
 expect "dispatch: prompt names the other items" "$args" "the others work on #21."
 expect "dispatch: prompt stops on the same obstacle twice" "$args" "If you hit the same obstacle a second time"
 expect "dispatch: an unfixable PR check is not an obstacle" "$args" "a PR check you cannot fix is not an obstacle"
-expect "dispatch: prompt defines the wait block" "$args" "ORCHESTRATOR_WORKER_WAITING"
+expect "dispatch: prompt defines the wait block" "$args" "RUNWAVES_WORKER_WAITING"
 expect "dispatch: wait block names what it waits on" "$args" "waiting-on: <what you are waiting for>"
 expect "dispatch: waiting is not blocked" "$args" "Waiting is not blocked"
 expect "dispatch: markers go on a line of their own" "$args" "the marker on a line of its own"
-expect_not "dispatch: output never echoes the prompt" "$out" "ORCHESTRATOR_WORKER_DONE"
+expect_not "dispatch: output never echoes the prompt" "$out" "RUNWAVES_WORKER_DONE"
 
 # first prompt line per harness
 for pair in 'opencode|Use the implement skill to do #20.' 'agy|/implement #20' 'antigravity|/implement #20' \
@@ -541,13 +542,13 @@ args=$(cat "$FIX/create.args")
 expect "two-part: the user's words under their own label" "$args" \
   $'The user\'s words (verbatim; this is the task and the whole of its scope):\ncache the search results\n'
 expect "two-part: the notes under their own label" "$args" \
-  $'Orchestrator\'s notes (context and what stays out of scope; they add no work):\nLives in search/. Out of scope: the image cache.\n'
+  $'Coordinator\'s notes (context and what stays out of scope; they add no work):\nLives in search/. Out of scope: the image cache.\n'
 expect "two-part: still a plan label" "$args" "T2 is a label in this run's plan only"
 plan_with "[$(jq -nc '{id: "T3", title: "Fix login", ask: "fix the login redirect", notes: null, state: "queued", branch: null}')]"
 "$scripts/dispatch.sh" proj "$plan" T3 >/dev/null 2>&1
 args=$(cat "$FIX/create.args")
 expect "two-part: words alone when there are no notes" "$args" $'fix the login redirect\n'
-expect_not "two-part: no empty notes label" "$args" "Orchestrator's notes"
+expect_not "two-part: no empty notes label" "$args" "Coordinator's notes"
 dispatch_sandbox
 dispatch >/dev/null 2>&1
 expect_not "tracker item: no user's-words label" "$(cat "$FIX/create.args")" "The user's words"
@@ -636,7 +637,7 @@ expect "integrate dispatch: lists the sub-PRs" "$args" "#1 One: https://github.c
 expect "integrate dispatch: names dropped items" "$args" "#2 Two: https://github.com/acme/app/pull/6 (dropped, not included)"
 expect "integrate dispatch: leaves the merge to the user" "$args" "Do not merge the final PR"
 expect_not "integrate dispatch: not stacked" "$args" "Stacked:"
-expect "integrate dispatch: worker prompt still ends in a DONE block" "$args" "ORCHESTRATOR_WORKER_DONE"
+expect "integrate dispatch: worker prompt still ends in a DONE block" "$args" "RUNWAVES_WORKER_DONE"
 
 # --- merge gate --------------------------------------------------------------------------------
 gate_sandbox() { # gate_sandbox <checked> [acceptance]
@@ -1105,7 +1106,7 @@ expect "move: fatal banner is a blocked need" "$(needs)" "blocked:#1"
 one in-progress "In Progress" blocked; cyc
 expect "move: Paradev blocked (needs input) is a question, state unchanged" "$(needs) $(pf .state)" "question:#1 in-progress"
 one in-progress "In Progress" idle; cyc
-expect "move: idle, no PR, no wait -> one follow-up" "$(cat "$FIX/send.log")" "t1 Please finish: commit, push and open the PR (gh pr create --base main), then print your ORCHESTRATOR_WORKER_DONE block."
+expect "move: idle, no PR, no wait -> one follow-up" "$(cat "$FIX/send.log")" "t1 Please finish: commit, push and open the PR (gh pr create --base main), then print your RUNWAVES_WORKER_DONE block."
 expect "move: the follow-up is recorded" "$(pf .reason) $(evs)" "follow-up sent #1:follow-up-sent"
 cyc
 expect "move: a second idle cycle blocks instead of a second follow-up" "$(pf '.state + "/" + .reason') $(wc -l <"$FIX/send.log" | tr -d ' ')" "blocked/no PR after the follow-up 1"
@@ -1225,7 +1226,7 @@ expect_exit "finished: exit 0 with nothing to judge" "$rc" 0
 one in-review "In Review" idle; cyc; cyc
 expect "finished: in-review only -> finished but the run stays active" "$(jq -r .finished <<<"$out") $(jq -r .status "$plan")" "true active"
 expect "finished: notified once" "$(wc -l <"$FIX/notify.log" | tr -d ' ')" 1
-expect "finished: notification text" "$(cat "$FIX/notify.log")" "notifications show Orchestrator finished --body 1 in review, 0 blocked --sound"
+expect "finished: notification text" "$(cat "$FIX/notify.log")" "notifications show Runwaves finished --body 1 in review, 0 blocked --sound"
 one in-progress "In Progress" working; cyc
 expect "finished: a running item is not finished" "$(jq -r .finished <<<"$out")" false
 
@@ -1400,10 +1401,10 @@ expect "local dispatch: the worker opens no PR" "$args" "open no PR and push not
 expect "local dispatch: tests before each commit" "$args" "Before every commit run the test suites"
 expect "local dispatch: DONE names the local run" "$args" "pr: none (local integration)"
 expect_not "local dispatch: no PR check instructions" "$args" "gh pr checks"
-expect "local dispatch: still ends in a DONE block" "$args" "ORCHESTRATOR_WORKER_DONE"
+expect "local dispatch: still ends in a DONE block" "$args" "RUNWAVES_WORKER_DONE"
 # a GitHub-side item waits for every check, quietly
 dispatch_sandbox; dispatch >/dev/null 2>&1; args=$(cat "$FIX/create.args")
-expect "dispatch: DONE waits for every check" "$args" "ORCHESTRATOR_WORKER_DONE while a check is pending or red"
+expect "dispatch: DONE waits for every check" "$args" "RUNWAVES_WORKER_DONE while a check is pending or red"
 expect "dispatch: checks are watched quietly" "$args" '--watch --fail-fast >/dev/null 2>&1; echo exit=$?'
 expect "dispatch: only failed checks are listed" "$args" "--json name,state,bucket"
 expect "dispatch: an open PR is still the goal" "$args" "Your goal is an open PR"
@@ -1579,9 +1580,9 @@ expect "chain integrate dispatch: starts from the chain branch" "$args" $'--base
 expect "chain integrate dispatch: pushes the chain branch" "$args" "git push origin HEAD:chain/1-parse-rows"
 expect "chain integrate dispatch: opens chain to parent" "$args" "gh pr create --base feature/csv --head chain/1-parse-rows"
 expect "chain integrate dispatch: lists the chain's tasks" "$args" "#2 Map columns"
-expect "chain integrate dispatch: the orchestrator merges it" "$args" "the orchestrator merges it into feature/csv once its checks pass"
+expect "chain integrate dispatch: the coordinator merges it" "$args" "the coordinator merges it into feature/csv once its checks pass"
 expect_not "chain integrate dispatch: not left to the user" "$args" "the user reviews and merges it"
-expect "chain integrate dispatch: waits for its checks" "$args" "ORCHESTRATOR_WORKER_DONE while a check is pending or red"
+expect "chain integrate dispatch: waits for its checks" "$args" "RUNWAVES_WORKER_DONE while a check is pending or red"
 expect "chain integrate dispatch: the parent stays on origin" "$(git show-ref --verify --quiet refs/heads/feature/csv || echo none)" none
 
 # merge.sh: a chain item merges into its chain branch in this clone; a conflict waits, a red run is not merged
@@ -1780,6 +1781,80 @@ if command -v python3 >/dev/null; then
   expect "usage: --run prints the percentage" "$out" "orchestrator output: 150 of 500 worker output = 30.0%"
   expect "usage: --run counts hand-written plan writes" "$out" "hand-written plan writes (jq ... | plan.sh write): 1"
 fi
+
+# --- Orca backend: ownership, dispatch, status, send ------------------------------------------
+orca_on() { unset SUPERSET_TERMINAL_ID; export ORCA_TERMINAL_HANDLE=${1:-term_me}; }
+orca_off() { unset ORCA_TERMINAL_HANDLE; export SUPERSET_TERMINAL_ID=me; }
+
+sandbox; orca_on
+jq -n '{repo: "acme/app", status: "active", items: []}' >"$root/next.json"
+"$scripts/plan.sh" write "$root/next.json" >/dev/null
+expect "orca plan: the owner is the Orca terminal handle" "$(jq -r .owner "$plan")" "term_me"
+expect "orca plan: check says mine" "$("$scripts/plan.sh" check)" "mine"
+orca_on term_other
+echo '[{"handle": "term_me", "orphaned": false, "connected": true, "agentIdentity": "claude"}]' >"$FIX/orca-terminals.json"
+out=$("$scripts/plan.sh" claim 2>&1); code=$?
+expect_exit "orca plan: a live Orca owner refuses a second run" $code 3
+echo '[{"handle": "term_me", "orphaned": false, "connected": true}]' >"$FIX/orca-terminals.json"
+out=$("$scripts/plan.sh" claim 2>&1); code=$?
+expect_exit "orca plan: an owner terminal with no agent is stale" $code 4
+echo '[]' >"$FIX/orca-terminals.json"
+out=$("$scripts/plan.sh" claim --takeover 2>&1); code=$?
+expect_exit "orca plan: a gone Orca owner is taken over" $code 0
+expect "orca plan: the takeover names the old owner" "$out" "taken over from term_me"
+orca_off
+
+dispatch_sandbox; orca_on; jq '.owner = "term_me"' "$plan" >"$plan.tmp" && mv "$plan.tmp" "$plan"
+mkdir -p "$FIX/orca-wt"; git -C "$FIX/orca-wt" init -q -b krucx/issue-20-add-csv-export-please
+out=$("$scripts/dispatch.sh" - "$plan" '#20' 2>&1); code=$?
+expect_exit "orca dispatch: success exits 0" $code 0
+expect "orca dispatch: one summary line" "$out" "dispatched #20 -> krucx/issue-20-add-csv-export-please (orca dispatch ctx_new, terminal term_new)"
+expect "orca dispatch: plan records dispatch, terminal and Orca's branch" "$(plan_item)" \
+  '{"state":"in-progress","branch":"krucx/issue-20-add-csv-export-please","workspace":"ctx_new","terminal":"term_new"'
+args=$(cat "$FIX/orca-start.args")
+expect "orca dispatch: a new child worktree" "$args" $'--worktree\nnew-child'
+expect "orca dispatch: named after the branch" "$args" $'--name\nissue-20-add-csv-export-please'
+expect "orca dispatch: from the target" "$args" $'--base-branch\nmain'
+spec=$(cat "$FIX/orca-spec")
+expect "orca dispatch: spec names the skill in plain text" "$spec" "Use the implement skill to do #20."
+expect "orca dispatch: spec ends in the DONE block" "$spec" "RUNWAVES_WORKER_DONE"
+expect "orca dispatch: worker_done carries the block" "$spec" "worker_done report (and any blocked report) must contain that block verbatim"
+expect_not "orca dispatch: no Paradev workspace" "$(cat "$FIX/create.args" 2>/dev/null)" "--project"
+
+dispatch_sandbox; orca_on; jq '.owner = "term_me"' "$plan" >"$plan.tmp" && mv "$plan.tmp" "$plan"
+echo "agent not enabled" >"$FIX/orca-start-fail"
+out=$("$scripts/dispatch.sh" - "$plan" '#20' 2>&1); code=$?
+expect_exit "orca dispatch: a failed start exits 1" $code 1
+expect "orca dispatch: a failed start rolls back to queued" "$(plan_item)" '"state":"queued","branch":null'
+orca_off
+
+sandbox; orca_on
+plan_with "[$(item '#1' in-progress ctx_1 term_1), $(item '#2' in-progress ctx_2 term_2), $(item '#3' in-progress ctx_gone '')]" '{"owner": "term_me"}'
+mkdir -p "$FIX/orca-workers"
+echo '{"dispatchId": "ctx_1", "runId": "run_1", "state": "succeeded", "terminal": "term_1"}' >"$FIX/orca-workers/ctx_1"
+echo '{"dispatchId": "ctx_2", "runId": "run_1", "state": "running", "terminal": "term_2", "waitingOnHuman": true}' >"$FIX/orca-workers/ctx_2"
+jq -n '[{type: "worker_done", body: "Done.\nRUNWAVES_WORKER_DONE\nitem: #1\npr: https://github.com/acme/app/pull/5\nsummary: s\nchecked: 2/2 green\ncriteria: 3/3\n",
+         payload: {dispatchId: "ctx_1"}}]' >"$FIX/orca-inbox.json"
+echo '[{"headRefName": "b-#1", "number": 5, "url": "https://github.com/acme/app/pull/5", "state": "OPEN", "isDraft": false}]' >"$FIX/prs.json"
+rows=$("$scripts/status.sh" - "$plan")
+row() { jq -c --arg i "$1" "select(.item == \$i) | $2" <<<"$rows"; }
+expect "orca status: a settled dispatch is idle" "$(row '#1' .agent.state)" '"idle"'
+expect "orca status: the worker_done block is parsed" "$(row '#1' .worker)" '"marker":"done"'
+expect "orca status: criteria from the block" "$(row '#1' .worker.criteria)" '{"met":3,"total":3,"unmet":[]}'
+expect "orca status: the branch's PR" "$(row '#1' .pr.number)" "5"
+expect "orca status: waiting on a human is blocked with no reason" "$(row '#2' .agent)" '"reason":null,"state":"blocked"'
+expect "orca status: an unknown dispatch is missing" "$(row '#3' .missing)" "true"
+
+out=$("$scripts/cycle.sh" - "$plan" 2>&1); code=$?
+expect_exit "orca cycle: needs the model" $code 10
+expect "orca cycle: the DONE item goes to acceptance" "$out" '"kind":"accept","item":"#1"'
+expect "orca cycle: a worker question surfaces" "$out" '"kind":"question","item":"#2"'
+expect_exit "orca cycle: no tag moves on Orca" "$([[ -f $FIX/tags.log ]] && echo moved || echo none)" none
+
+"$scripts/send.sh" "$plan" '#2' "use the staging key" >/dev/null; code=$?
+expect_exit "orca send: exits 0" $code 0
+expect "orca send: goes to the dispatch" "$(cat "$FIX/orca-send.log")" "dispatch:ctx_2 use the staging key"
+orca_off
 
 # zsh too, when installed
 if command -v zsh >/dev/null; then

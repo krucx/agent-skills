@@ -16,7 +16,8 @@
 #                       blocked  a fatal banner (usage/rate limit, quota, context window, expired
 #                                sign-in) in the last 20 lines, with no worker block; reason = it
 #                       stalled  Paradev says working, screen unchanged for STALL_MINUTES (15)
-#   worker            the last ORCHESTRATOR_WORKER_DONE/BLOCKED/WAITING block on screen as {marker,
+#   worker            the last RUNWAVES_WORKER_DONE/BLOCKED/WAITING block on screen (the older
+#                     ORCHESTRATOR_WORKER_* name too) as {marker,
 #                     item, pr, summary, checked, criteria, reason, needs, waitingOn, resumesWhen}, or null.
 #                     marker "waiting" = a declared wait (busy, not done); a later DONE/BLOCKED
 #                     replaces it; still latest after WAIT_MINUTES (30) it adds "stale": true and
@@ -27,6 +28,10 @@
 # --compact: one short line per workspace, for watch cycles, adding "branch <b>" or "terminal <t>"
 # only when they differ from the plan's.
 # Screen hashes: ~/.agents/orchestrator/screens/<plan's runId, else project>.json.
+# On Orca (common.sh backend) the rows are the plan's dispatched items only: agent state from
+# `orca orchestration worker-show` (working until the dispatch settles; blocked with no reason while
+# it waits on a human), worker from the block in its latest worker_done message, pr as above; no
+# groups, stalls or screens.
 # gh and Paradev list calls retry 3 times, RETRY_DELAY (5) seconds apart, doubling.
 set -euo pipefail
 
@@ -40,9 +45,6 @@ WAIT_MINUTES=${WAIT_MINUTES:-30}
 # Last-resort agent messages that mean it can't go on; matched ignoring case.
 FATAL='usage limit|rate[ -]limit(ed| reached| exceeded)|quota (exceeded|exhausted|reached)|exceeded your (current )?quota|insufficient_quota|context (window|length) (exceeded|exhausted|is full)|context_length_exceeded|out of context|(auth(entication)?|session|token|credentials?|login) (has )?expired|please (log|sign) ?in again|not logged in|invalid api key'
 
-# superset, paradev and pdev are the same Paradev CLI; use whichever is installed.
-cli=$(command -v superset || command -v paradev || command -v pdev) ||
-  { echo "Paradev CLI not found: install superset, paradev or pdev" >&2; exit 1; }
 
 # Run a gh or Paradev call, retrying transient failures (e.g. "error connecting to
 # api.github.com") with backoff; print its output only once it succeeds.
@@ -54,6 +56,118 @@ retry() {
   done
   return 1
 }
+
+# The last RUNWAVES_WORKER_* (or older ORCHESTRATOR_WORKER_*) block in a text, as JSON (terminal-wrapped values rejoined).
+# A block whose fields are still <angle-bracket> placeholders is the prompt's own template, not a report;
+# the marker counts only on a line of its own, so the prompt naming it mid-sentence is not one either.
+worker_block() {
+  awk '
+    function keep(   k, ph) {
+      if (marker == "") return
+      for (k in v) if (v[k] ~ /^<.*>$/) ph = 1
+      if (ph) return
+      for (k in best) delete best[k]
+      for (k in v) best[k] = v[k]
+      bestmarker = marker
+    }
+    { line = $0; sub(/^([[:space:]]|⏺|•|│)+/, "", line); sub(/([[:space:]]|│)+$/, "", line) }
+    line ~ /^(RUNWAVES|ORCHESTRATOR)_WORKER_(DONE|BLOCKED|WAITING)$/ { keep(); n = 0; key = ""; done = 0
+      marker = line; sub(/^[A-Z]+_WORKER_/, "", marker); marker = tolower(marker); delete v; next }
+    marker == "" || done { next }
+    line ~ /^unmet:/ { key = "unmet"; v[key] = v[key] (key in v ? "\037" : "") substr(line, 8); next }
+    line ~ /^(item|pr|summary|checked|criteria|reason|needs|waiting-on|resumes-when):/ {
+      key = substr(line, 1, index(line, ":") - 1); v[key] = substr(line, length(key) + 3); next }
+    key != "" && (line == "" || line ~ /^(─|━|>|❯)/) { done = 1; next }
+    key != "" { v[key] = v[key] " " line }
+    END { keep(); if (bestmarker != "") { printf "marker\t%s\n", bestmarker; for (k in best) printf "%s\t%s\n", k, best[k] } }' |
+    jq -Rsc 'split("\n") | map(select(length > 0) | split("\t") | {(.[0]): (.[1:] | join("\t"))}) | add
+      | if . then
+          ((.criteria // "") | capture("^(?<met>[0-9]+) */ *(?<total>[0-9]+)$")? // null) as $c
+          | (.unmet // "" | split("\u001f") | map(select(length > 0))) as $unmet
+          | del(.unmet)
+          | (if .marker == "done"
+             then .criteria = (if $c then {met: ($c.met | tonumber), total: ($c.total | tonumber), unmet: $unmet} else null end)
+             else del(.criteria) end)
+          | with_entries(.key |= ({"waiting-on": "waitingOn", "resumes-when": "resumesWhen"}[.] // .))
+        else . end'
+}
+
+emit() { # print $out, one row per line (compact or full)
+  if [[ -n $compact ]]; then
+    jq -r '[(.item // .name // .id), (.group // "-"),
+            (.agent.state + (if .agent.reason then " (\(.agent.reason))" else "" end)),
+            (if .pr then "PR #\(.pr.number) \(.pr.state)"
+              + (if .pr.conflicting then " CONFLICTING (base \(.pr.base))" else "" end)
+             else "no PR" end)]
+           + (if .missing then ["missing"] else [] end)
+           + (if .planBranch and .branch != .planBranch then ["branch \(.branch)"] else [] end)
+           + (if .inPlan and .agent.terminal and .planTerminal != .agent.terminal
+              then ["terminal \(.agent.terminal) (\(.agent.id))"] else [] end)
+           + (if .worker then ["worker \(.worker.marker)"
+                + (if .worker.waitingOn then ", on: \(.worker.waitingOn)" else "" end)
+                + (if .worker.resumesWhen then ", until: \(.worker.resumesWhen)" else "" end)
+                + (if .worker.stale then ", stale wait (\(.worker.staleMinutes) minutes)" else "" end)
+                + (if .worker.checked then ", checked: \(.worker.checked)" else "" end)
+                + (if .worker.criteria then ", criteria \(.worker.criteria.met)/\(.worker.criteria.total)"
+                    + (if (.worker.criteria.unmet | length) > 0 then ", \(.worker.criteria.unmet | length) unmet" else "" end)
+                  else "" end)
+                + (if .worker.reason then ", reason: \(.worker.reason)" else "" end)] else [] end)
+           | join(" | ")' <<<"$out"
+  else
+    jq -c 'del(.screen, .planBranch, .planTerminal)' <<<"$out"
+  fi
+}
+
+. "$here/common.sh"
+if [[ $(backend) == orca ]]; then
+  prs=$(retry gh pr list --state all --limit 300 --json headRefName,number,url,state,isDraft)
+  conflicts=$(retry gh pr list --state open --limit 300 --json number,baseRefName,mergeable |
+    jq -c '[.[] | select(.mergeable == "CONFLICTING") | {number, base: .baseRefName}]')
+  inboxes='{}'
+  out=''
+  [[ -n "$plan" && -f "$plan" ]] && out=$(jq -c '.items[] | select(.workspace != null) | {item: .id, id: .workspace, branch, terminal}' "$plan" |
+    while IFS= read -r p; do
+      d=$(jq -r .id <<<"$p")
+      if ! shown=$(orca_cli orchestration worker-show --dispatch "$d" --json </dev/null 2>/dev/null) ||
+          ! jq -e '.result.dispatchId' <<<"$shown" >/dev/null 2>&1; then
+        jq -c '{id, name: null, branch, group: null, missing: true, item, inPlan: true,
+          agent: {terminal, id: null, state: "none", reason: null}, worker: null, pr: null}' <<<"$p"
+        continue
+      fi
+      run=$(jq -r '.result.runId // empty' <<<"$shown")
+      body=''
+      if [[ -n $run ]]; then
+        if [[ $(jq -r --arg r "$run" 'has($r)' <<<"$inboxes") != true ]]; then
+          mail=$(orca_cli orchestration inbox --terminal "run:$run" --limit 100 --full --json </dev/null 2>/dev/null || echo '{}')
+          inboxes=$(jq -c --arg r "$run" --argjson m "$(jq -c '[.result.messages[]?]' <<<"$mail" 2>/dev/null || echo '[]')" '.[$r] = $m' <<<"$inboxes")
+        fi
+        body=$(jq -r --arg r "$run" --arg d "$d" '[.[$r][] | select(.type == "worker_done" and .payload.dispatchId == $d)] | last | .body // empty' <<<"$inboxes")
+      fi
+      worker=$(printf '%s\n' "$body" | worker_block)
+      jq -c --argjson s "$shown" --argjson worker "${worker:-null}" --argjson prs "$prs" --argjson conflicts "$conflicts" '
+        ($s.result) as $r
+        | ($r.state // "") as $st
+        | {id, name: null, branch, group: null, missing: false, item, inPlan: true,
+           agent: {terminal: ($r.terminal // .terminal), id: null, reason: null,
+                   state: (if $r.waitingOnHuman == true then "blocked"
+                           elif ($st | test("^(succeeded|failed|completed|cancell?ed|stopped|exited|lost|abandoned)$")) then "idle"
+                           else "working" end)},
+           worker: $worker,
+           pr: null}
+        | . as $row
+        | .pr = ([$prs[] | select(.headRefName == $row.branch)][0]
+                 | if . == null then null else
+                     {number, url, state, isDraft} as $pr
+                     | ([$conflicts[] | select(.number == $pr.number)][0]) as $c
+                     | if $c then $pr + {conflicting: true, base: $c.base} else $pr end end)' <<<"$p"
+    done)
+  emit
+  exit 0
+fi
+
+# superset, paradev and pdev are the same Paradev CLI; use whichever is installed.
+cli=$(command -v superset || command -v paradev || command -v pdev) ||
+  { echo "Paradev CLI not found: install superset, paradev or pdev" >&2; exit 1; }
 
 groups=$("$here/groups.sh" "$project" plan "$plan") || (($? == 2))
 snapshot=$(retry "$cli" snapshot --json)
@@ -114,41 +228,6 @@ rows=$(jq -c --argjson tagged "$tagged" --argjson extra "$extra" --argjson plann
       planTerminal: $p.terminal
     }')
 
-# The last ORCHESTRATOR_WORKER_* block on a screen, as JSON (terminal-wrapped values rejoined).
-# A block whose fields are still <angle-bracket> placeholders is the prompt's own template, not a report;
-# the marker counts only on a line of its own, so the prompt naming it mid-sentence is not one either.
-worker_block() {
-  awk '
-    function keep(   k, ph) {
-      if (marker == "") return
-      for (k in v) if (v[k] ~ /^<.*>$/) ph = 1
-      if (ph) return
-      for (k in best) delete best[k]
-      for (k in v) best[k] = v[k]
-      bestmarker = marker
-    }
-    { line = $0; sub(/^([[:space:]]|⏺|•|│)+/, "", line); sub(/([[:space:]]|│)+$/, "", line) }
-    line ~ /^ORCHESTRATOR_WORKER_(DONE|BLOCKED|WAITING)$/ { keep(); n = 0; key = ""; done = 0
-      marker = line; sub(/^ORCHESTRATOR_WORKER_/, "", marker); marker = tolower(marker); delete v; next }
-    marker == "" || done { next }
-    line ~ /^unmet:/ { key = "unmet"; v[key] = v[key] (key in v ? "\037" : "") substr(line, 8); next }
-    line ~ /^(item|pr|summary|checked|criteria|reason|needs|waiting-on|resumes-when):/ {
-      key = substr(line, 1, index(line, ":") - 1); v[key] = substr(line, length(key) + 3); next }
-    key != "" && (line == "" || line ~ /^(─|━|>|❯)/) { done = 1; next }
-    key != "" { v[key] = v[key] " " line }
-    END { keep(); if (bestmarker != "") { printf "marker\t%s\n", bestmarker; for (k in best) printf "%s\t%s\n", k, best[k] } }' |
-    jq -Rsc 'split("\n") | map(select(length > 0) | split("\t") | {(.[0]): (.[1:] | join("\t"))}) | add
-      | if . then
-          ((.criteria // "") | capture("^(?<met>[0-9]+) */ *(?<total>[0-9]+)$")? // null) as $c
-          | (.unmet // "" | split("\u001f") | map(select(length > 0))) as $unmet
-          | del(.unmet)
-          | (if .marker == "done"
-             then .criteria = (if $c then {met: ($c.met | tonumber), total: ($c.total | tonumber), unmet: $unmet} else null end)
-             else del(.criteria) end)
-          | with_entries(.key |= ({"waiting-on": "waitingOn", "resumes-when": "resumesWhen"}[.] // .))
-        else . end'
-}
-
 # Plan workspaces: read the screen's tail for the worker block, fatal banners and stalls.
 key=$( [[ -n "$plan" && -f "$plan" ]] && jq -r '.runId // empty' "$plan" || true)
 screens="$HOME/.agents/orchestrator/screens/${key:-$project}.json"
@@ -196,26 +275,4 @@ mkdir -p "$(dirname "$screens")"
 jq -sc 'map(select(.screen) | {(.agent.terminal): .screen}) | add // {}' <<<"$out" >"$screens.tmp.$$"
 mv -f "$screens.tmp.$$" "$screens"
 
-if [[ -n $compact ]]; then
-  jq -r '[(.item // .name // .id), (.group // "-"),
-          (.agent.state + (if .agent.reason then " (\(.agent.reason))" else "" end)),
-          (if .pr then "PR #\(.pr.number) \(.pr.state)"
-            + (if .pr.conflicting then " CONFLICTING (base \(.pr.base))" else "" end)
-           else "no PR" end)]
-         + (if .missing then ["missing"] else [] end)
-         + (if .planBranch and .branch != .planBranch then ["branch \(.branch)"] else [] end)
-         + (if .inPlan and .agent.terminal and .planTerminal != .agent.terminal
-            then ["terminal \(.agent.terminal) (\(.agent.id))"] else [] end)
-         + (if .worker then ["worker \(.worker.marker)"
-              + (if .worker.waitingOn then ", on: \(.worker.waitingOn)" else "" end)
-              + (if .worker.resumesWhen then ", until: \(.worker.resumesWhen)" else "" end)
-              + (if .worker.stale then ", stale wait (\(.worker.staleMinutes) minutes)" else "" end)
-              + (if .worker.checked then ", checked: \(.worker.checked)" else "" end)
-              + (if .worker.criteria then ", criteria \(.worker.criteria.met)/\(.worker.criteria.total)"
-                  + (if (.worker.criteria.unmet | length) > 0 then ", \(.worker.criteria.unmet | length) unmet" else "" end)
-                else "" end)
-              + (if .worker.reason then ", reason: \(.worker.reason)" else "" end)] else [] end)
-         | join(" | ")' <<<"$out"
-else
-  jq -c 'del(.screen, .planBranch, .planTerminal)' <<<"$out"
-fi
+emit

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Relay one message to an item's worker: resolves the workspace and terminal from the plan, records
 # a follow-up-sent event (and, with --reason, moves the item to feedback with that reason) in one
-# plan write, then sends with `terminals send`. The write comes first, so a failed write sends nothing.
+# plan write, then sends with `terminals send` (on Orca, `orca orchestration send` to the item's
+# dispatch, which needs no terminal). The write comes first, so a failed write sends nothing.
 #
 # Usage (inside the repo):
 #   send.sh <plan-file> <ID> "<text>" [--reason <r>]
@@ -11,6 +12,8 @@
 set -uo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
+. "$here/common.sh"
+host=$(backend)
 die() { echo "send: $*" >&2; exit 1; }
 usage() { sed -n '6,10p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 1; }
 
@@ -33,10 +36,10 @@ jq -e --arg id "$id" 'any(.items[]; .id == $id)' <<<"$P" >/dev/null || die "no i
 ws=$(jq -r --arg id "$id" '.items[] | select(.id == $id) | .workspace // empty' <<<"$P")
 term=$(jq -r --arg id "$id" '.items[] | select(.id == $id) | .terminal // empty' <<<"$P")
 [[ -n $ws ]] || die "$id has no workspace in the plan"
-[[ -n $term ]] || die "$id has no terminal in the plan"
+[[ -n $term || $host == orca ]] || die "$id has no terminal in the plan"
 [[ $mode != check ]] || exit 0
 
-cli=$(command -v superset || command -v paradev || command -v pdev) || die "Paradev CLI not found"
+[[ $host == orca ]] || cli=$(command -v superset || command -v paradev || command -v pdev) || die "Paradev CLI not found"
 
 if [[ $mode == send ]]; then
   scratch=$(mktemp -d "${TMPDIR:-/tmp}/send.XXXXXX")
@@ -52,5 +55,10 @@ if [[ $mode == send ]]; then
   esac
 fi
 
+if [[ $host == orca ]]; then
+  orca_cli orchestration send --to "dispatch:$ws" --subject "runwaves: $id" --body "$text" </dev/null >/dev/null 2>&1 ||
+    die "could not send to $id (orca dispatch $ws)"
+  exit 0
+fi
 "$cli" terminals send --workspace "$ws" --local --terminal "$term" --text "$text" </dev/null >/dev/null 2>&1 ||
   die "could not send to $id (workspace $ws, terminal $term)"

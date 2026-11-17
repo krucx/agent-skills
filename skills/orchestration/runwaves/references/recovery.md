@@ -2,8 +2,9 @@
 
 Load when preflight exits 3 or 4, a run is resumed, or the user says "close".
 
-One **active run** per repo, owned by a coordinator terminal (`$SUPERSET_TERMINAL_ID`) with a
-heartbeat. `preflight.sh` runs `plan.sh claim` and reports it:
+One **active run** per repo, owned by a coordinator terminal (`$SUPERSET_TERMINAL_ID` on Paradev,
+`$ORCA_TERMINAL_HANDLE` on Orca) with a heartbeat. `plan.sh claim` (on Paradev through
+`preflight.sh`) reports it:
 
 - `free`: new plan (a finished run moves to `~/.agents/orchestrator/history/`). Following
   `carryOver` and `integrationCarryOver` lines report unfinished standalone items and open
@@ -35,4 +36,4 @@ Workspaces stay as they are.
 
 A run stays `active` while any item is `in-review`/`feedback`/`blocked`/`waiting`; `finished` once
 all are `done`/`skipped` and each integration's PR is merged. `cycle.sh` reports `finished`, and
-desktop-notifies it (`superset notifications show "Orchestrator finished"`).
+desktop-notifies it on Paradev (`superset notifications show "Runwaves finished"`).
