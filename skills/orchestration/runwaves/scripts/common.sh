@@ -4,6 +4,9 @@
 # paradev. On orca, a plan item's workspace is its Orca dispatch ID and its terminal Orca's handle.
 backend() { if [[ -z ${SUPERSET_TERMINAL_ID:-} && -n ${ORCA_TERMINAL_HANDLE:-} ]]; then echo orca; else echo paradev; fi; }
 
+# How a follow-up asks for the worker's final report: Orca workers report through Orca itself.
+report_ask() { if [[ $(backend) == orca ]]; then echo "report back"; else echo "print your RUNWAVES_WORKER_DONE block"; fi; }
+
 # The Orca CLI for this session (Orca exports ORCA_CLI_COMMAND for managed WSL sessions).
 orca_cli() { "${ORCA_CLI_COMMAND:-orca}" "$@"; }
 

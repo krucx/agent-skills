@@ -20,6 +20,7 @@
 set -uo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
+. "$here/common.sh"
 die() { echo "accept: $*" >&2; exit 1; }
 usage() { sed -n '6,17p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 1; }
 now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
@@ -134,7 +135,7 @@ verdict() {
     pr=$(jq -r '.pr // empty' <<<"$it")
     msg=$text
     if grep -qiE '(^|[^[:alnum:]])(checks?|CI)([^[:alnum:]]|$)' <<<"$text"; then
-      msg="$text Wait for \`gh pr checks${pr:+ $pr} --watch --fail-fast\`, report the result in \`checked:\`, and print your RUNWAVES_WORKER_DONE block again."
+      msg="$text Wait for \`gh pr checks${pr:+ $pr} --watch --fail-fast\`, report the result in \`checked:\`, and $(report_ask) again."
     fi
     P=$(jq -c --arg id "$id" --arg g "$text" --arg m "$msg" --arg at "$(now)" '
       (.items[] | select(.id == $id)) |= (.acceptance = $g | .state = "feedback" | .reason = "acceptance follow-up")
@@ -159,7 +160,7 @@ verdict() {
 tag_move() { # the item's workspace to the In Review group's tag; a failure is cycle.sh's to retry
   local ws tag cli
   ws=$(jq -r --arg id "$1" '.items[] | select(.id == $id) | .workspace // empty' <<<"$P")
-  [[ -n $ws && -z ${SUPERSET_TERMINAL_ID:-} && -n ${ORCA_TERMINAL_HANDLE:-} ]] && return 0  # Orca: no groups
+  [[ $(backend) != orca ]] || return 0  # Orca has no sidebar groups
   [[ -n $ws ]] || return 0
   cli=$(command -v superset || command -v paradev || command -v pdev) || return 0
   tag=$(jq -r '.groups["In Review"] // "In Review"' <<<"$P")

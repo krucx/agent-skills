@@ -9,7 +9,9 @@ only the scripts change it.
 - Load Orca's `orchestration` skill and its guide once (`orca skills get orchestration`) for its
   wake and reply rules. Never run its `worker-start` yourself: `cycle.sh` starts every worker
   through `dispatch.sh`, one new child worktree per item on its own branch, visible in Orca's
-  sidebar, and records the dispatch in the plan.
+  sidebar, and records the dispatch in the plan. The spec is the task and its end state (a PR
+  into the target with passing checks) only; Orca's own preamble covers how the worker reports,
+  and its `worker_done` report is what `accept` shows you.
 - **Go**: `plan.sh write <draft>` (from then on `<plan-file>` is `plan.sh path`), the go
   message's answers (`chains.sh accept|share`, `epic.sh import`, as in
   [integrations](references/integrations.md)), then `cycle.sh - <plan-file>`. End your turn.
