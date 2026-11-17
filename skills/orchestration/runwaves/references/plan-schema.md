@@ -35,9 +35,6 @@
   integration can finish; `epic` (optional): `{id, title, url}` of the parent issue an epic run imported; the final PR links it; `integrates`: on the synthetic `<F>-integrate` item `integrate.sh add`
   creates (no `integration`; targets the default branch, starts on integration `<F>`'s branch), or `null`/absent for an item targeting the default branch. An item's
   **target** is its integration's `branch`, else the default branch; one run may mix both.
-- `cloud` (optional): `true` when the run's workspaces are cloud ones, which cannot reach this clone's
-  branches. The coordinator sets it (`jq '.cloud = true' | plan.sh write`) before the go when the user
-  asks for cloud workspaces; `chains.sh` and `epic.sh` then refuse `--local` and offer no local chain branch.
 - `pageId`: the run-summary page, once published; later [reporting](../paradev/loop.md#reporting) (`summary.sh`) pass
   it as `--page` to add a version.
 - `ask`: a free-text task's slice of the user's request, verbatim: the task and its whole scope

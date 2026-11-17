@@ -1520,13 +1520,6 @@ out=$("$scripts/chains.sh" offer "$plan")
 expect "local chain: a diamond offers its left side" "$out" '"items":["#2","#3"]'
 expect "local chain: and its right side" "$out" '"items":["#4","#5"]'
 expect "local chain: not the fork or the join" "$(wc -l <<<"$out" | tr -d ' ')" 2
-# cloud workspaces cannot reach this clone's branches: refused
-jq '.cloud = true' "$plan" >"$plan.t" && mv "$plan.t" "$plan"
-expect "local chain: nothing offered with cloud workspaces" "$("$scripts/chains.sh" offer "$plan")" ""
-expect "local chain: accept refuses with cloud workspaces" "$("$scripts/chains.sh" accept "$plan" '#2' 2>&1)" "local branches need workers on this machine"
-expect_exit "local chain: and exits 1" "$("$scripts/chains.sh" accept "$plan" '#2' >/dev/null 2>&1; echo $?)" 1
-expect "local chain: --local refused too" "$("$scripts/chains.sh" share "$plan" csv --local 2>&1)" "local branches need workers on this machine"
-expect "local chain: an epic's --local refused too" "$("$scripts/epic.sh" import "$plan" 400 --local 2>&1)" "local branches need workers on this machine"
 
 # integrate.sh: a chain lands on its parent through one <F>-integrate sub-PR; the parent waits for it
 chain_integ='{"integrations": [{"id": "F1", "title": "CSV", "branch": "feature/csv", "base": "main", "pr": null, "state": "open"},
