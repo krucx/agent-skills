@@ -185,3 +185,49 @@ orchestration plan already owns this repository, and starting another run here w
 that active plan. Re-measure after that run releases the plan. The post-change transcript must show
 that every non-empty orchestrator chat message is a plan/go, event-driven judgment or user action,
 user question, explicit report-back, or finish; record any violations as linked follow-up issues.
+
+## 13. Dry run and routing after #89 and #91 (#92)
+
+### Routing, checked 2026-11-17
+
+Each phrase ran twice in a fresh headless session (`claude -p "<phrase>" --allowedTools Skill
+--max-turns 3`, Claude Code 2.1.311, stdin closed) from an empty scratch repo whose
+`.claude/skills/runwaves` links to this branch's skill. The session also loaded the global
+`orchestration` (Orca) and `superset:orchestrate` skills, so all three competed. Only the Skill tool
+was allowed, so the first Skill call is the routing decision and nothing ran after it.
+
+| Phrase | Expected | Routed (2 sessions) |
+| --- | --- | --- |
+| `runwaves 340-343` | runwaves | runwaves, runwaves |
+| `plan runwaves for 340-343, 345 onwards` | runwaves | runwaves, runwaves |
+| `runwaves feature #400` | runwaves | runwaves, runwaves |
+| `runwaves report back` | runwaves | runwaves, runwaves |
+| `runwaves continue` | runwaves | runwaves, runwaves |
+| `runwaves close` | runwaves | runwaves, runwaves |
+| `plan these issues into waves and run them with parallel workers: #12 #13 #14, each to its own PR` | runwaves | runwaves, runwaves |
+| `run these 3 refactors in parallel and tell me when done` | not runwaves | none, none (asked which refactors) |
+| `have Codex review this branch and report back` | orchestration | orchestration, orchestration |
+
+All 18 sessions routed as expected. One install gap: the global `~/.claude/skills/orchestrator`
+link points at the old `skills/orchestrator` path, which no longer exists. A fresh session outside
+this repo therefore has no runwaves skill until it is reinstalled (`install.sh`).
+
+### Measured runs: not run
+
+The loop run with a nested local chain and the small fanout run both need a Paradev host. The
+backend rule picks **orca** first whenever `ORCA_WORKSPACE_ID` is set. The session that did this
+check ran inside Orca, and Paradev was not running, so neither run could start there. Start both
+from a Paradev workspace, then record them here with `usage.py --run <runId>`, using the columns in
+section 12:
+
+| Run | Orchestrator turns | Chat-only turns | Orchestrator output | Worker output | Output share | Orchestrator cache-read | Worker cache-read | Cache-read share | Peak context |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Loop, nested local chain | not run | | | | | | | | |
+| Fanout, 3 free-text tasks | not run | | | | | | | | |
+| Baseline: 12 issues, 2026-11-13 (section 1) | 151 | — | 114K | 278K | 41% | 20.2M | 42.7M | 47% | 191K |
+| Baseline: `20261114-2058` (section 12) | 192 | 41 | 73K | 443K | 16.6% | 22.1M | 46.4M | 47.7% | 157K |
+
+Acceptance criteria of #92:
+
+- [ ] Measurement recorded and compared with the Nov 2026 baseline: unmet. Needs a Paradev host (above).
+- [x] Each trigger phrase routes correctly in a fresh session: met (table above).
