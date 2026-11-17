@@ -1587,17 +1587,17 @@ expect "chain integrate dispatch: the parent stays on origin" "$(git show-ref --
 # merge.sh: a chain item merges into its chain branch in this clone; a conflict waits, a red run is not merged
 local_sandbox "local: npm test passed"
 jq --argjson i "$(jq -c .integrations <<<"$chain_integ")" '.integrations = $i | .items[0].integration = "F2"' "$plan" >"$plan.t" && mv "$plan.t" "$plan"
-git branch -q chain/1-parse-rows main
+git branch -q chain/1-parse-rows feature/csv
 expect "chain gate run: merges into the chain branch" "$(gate run)" "merged b-30 into chain/1-parse-rows"
 expect "chain gate run: never gh pr merge" "$(cat "$FIX/merge.args" 2>/dev/null)" ""
 expect "chain gate run: the parent branch is untouched" "$(git merge-base --is-ancestor b-30 feature/csv || echo untouched)" untouched
 local_sandbox "local: npm test failed"
 jq --argjson i "$(jq -c .integrations <<<"$chain_integ")" '.integrations = $i | .items[0].integration = "F2"' "$plan" >"$plan.t" && mv "$plan.t" "$plan"
-git branch -q chain/1-parse-rows main
+git branch -q chain/1-parse-rows feature/csv
 expect "chain gate: a red local run is not merged" "$(gate)" "followup:"
 local_sandbox "local: npm test passed"
 jq --argjson i "$(jq -c .integrations <<<"$chain_integ")" '.integrations = $i | .items[0].integration = "F2"' "$plan" >"$plan.t" && mv "$plan.t" "$plan"
-git checkout -q -b chain/1-parse-rows main && echo two >f && git add f && git commit -q -m two && git checkout -q b-30
+git checkout -q -b chain/1-parse-rows feature/csv && echo two >f && git add f && git commit -q -m two && git checkout -q b-30
 expect "chain gate run: a conflict waits" "$(gate run)" "wait: b-30 conflicts with chain/1-parse-rows"
 
 # cycle.sh: each chain's PR into the parent stands alone; a join across chains waits for both to land

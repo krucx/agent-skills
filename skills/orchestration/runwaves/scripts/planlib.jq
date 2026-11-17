@@ -58,7 +58,7 @@ def local_chains: . as $p | graph as $g | critical(0).items as $crit
   | [($p.integrations // [])[] | select((.local // false | not) and (.parent // null) == null
       and (.state // "open") == "open") | .id] as $gh
   | ($p.items | map({key: .id, value: (.integration // null)}) | from_entries) as $in
-  | [$p.items[] | select(.state == "queued" and (.integration // null) as $i | $i != null and ($gh | index($i)))
+  | [$p.items[] | select(.state == "queued" and ((.integration // null) as $i | $i != null and ($gh | index($i))))
      | .id | select(. as $x | $crit | index($x))] as $ok
   | def nxt($a): $g.dependents[$a] | select(length == 1) | .[0]
       | select(. as $b | ($ok | index($b)) and $in[$b] == $in[$a] and $g.deps[$b] == [$a]);
