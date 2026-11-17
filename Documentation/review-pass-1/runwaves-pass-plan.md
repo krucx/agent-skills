@@ -214,7 +214,8 @@ scratch repo is empty, so the session asked which refactors), which shows runwav
 not that `superset:orchestrate` is; and the skill was linked per project, not installed. One install
 gap: `~/.claude/skills/orchestrator` links to `~/.agents/skills/orchestrator`, which links to the old
 `skills/orchestrator` path in the main clone, which no longer exists. A fresh session outside
-this repo therefore has no runwaves skill until it is reinstalled (`install.sh`).
+this repo therefore had no runwaves skill. Fixed the same day by running `install.sh` from the main
+clone, which removed both stale links and linked `runwaves`.
 
 ### Orca dry run on dummy data, 2026-11-17
 
