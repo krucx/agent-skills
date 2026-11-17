@@ -1,7 +1,7 @@
 # Trackers beyond GitHub
 
 Load when an item or epic parent is a Linear or Jira key (`ENG-123`, `PROJ-7`). GitHub issues stay
-inline in SKILL.md (`gh`).
+inline in the planning steps (`gh`).
 
 - **Reach**: `superset tasks get <KEY> --tracker linear --json`, or the harness's own tools. Not
   reachable: stop and say how to connect (Linear in Paradev, or `superset plugins install

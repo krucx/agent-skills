@@ -5,7 +5,7 @@ from Claude Code, Codex, OpenCode, Antigravity, Gemini CLI, Hermes and any other
 
 | Skill | What it does |
 | --- | --- |
-| [runwaves](skills/orchestration/runwaves/SKILL.md) | Plans a batch of tracker issues, an epic ("runwaves feature #400") or free-text work into waves and runs them through parallel workers, a PR per task, with a saved, resumable plan. On Orca every run uses Orca workers, one child worktree per task. On Paradev, small free-text runs go through `superset:orchestrate` (1 or 2 tasks share the current workspace, 3 or more get one new sidebar workspace each); everything else uses the Paradev CLI with In Progress, In Review, Done and Blocked groups. For an ad-hoc fan-out without runwaves, use Orca's or Paradev's own skills directly. |
+| [runwaves](skills/orchestration/runwaves/SKILL.md) | Plans tracker issues or free-text tasks into waves (dependencies, critical path), then hands the run to Orca's orchestration: one worker and PR per item, Orca's own task graph and wakes, no runwaves scripts. On Paradev, small free-text runs go straight to `superset:orchestrate` the same way; everything else uses the Paradev loop in `paradev/plan.md`. |
 
 ## Install
 

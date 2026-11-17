@@ -51,7 +51,7 @@
 - `pr` (item and integration): `null`, or the full PR URL string (`"https://github.com/owner/repo/pull/388"`),
   never a bare number or `"#388"`; the scripts read it as a string and `plan.sh write` rejects anything else.
 - `preset`: `auto`|`regular`. `presets`: per harness, the kinds
-  [preflight](../SKILL.md#plan) found. `autoOnly`: per auto-only
+  [preflight](../paradev/plan.md) found. `autoOnly`: per auto-only
   harness, the user's `"accepted"`/`"declined"` (absent: not asked yet).
 - `checked`: the worker's `checked:` line. `acceptance`: `null`, `"ok"`, or the
   [gap](../paradev/loop.md#acting-on-needs). `followUp`: `null` or `{"after": "<ID>", "message": "<text>"}`
