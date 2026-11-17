@@ -7,15 +7,6 @@ default_branch() {
   echo "${b:-main}"
 }
 
-# is_cloud <plan-file>: the run uses cloud workspaces (`cloud: true`), which cannot reach this clone.
-is_cloud() { [[ $(jq -r '.cloud // false' "$1") == true ]]; }
-
-# no_cloud <plan-file>: refuse a local branch (local integration or chain) on a cloud run, exit 1.
-no_cloud() {
-  ! is_cloud "$1" ||
-    { echo "cloud workspaces: local branches need workers on this machine (this clone holds them)" >&2; exit 1; }
-}
-
 # plan_jq <filter> <plan-file> [jq args...]: jq with planlib.jq's defs. A dependency cycle prints one
 # line naming the plan and exits 1; any other jq error passes through, also exit 1.
 plan_jq() {

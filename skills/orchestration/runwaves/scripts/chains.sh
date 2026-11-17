@@ -7,8 +7,7 @@
 #        chains.sh accept <plan-file> [--local] <ID>...    make the chain containing each ID its own integration
 #        chains.sh share  <plan-file> <slug> [--local]     one feature/<slug> integration for every item
 # --local marks the integration `local: true`: the branch lives in this clone only, with no sub-PRs
-# (references/integrations.md, "Local integration branch"). A plan with `cloud: true` (cloud
-# workspaces cannot reach this clone's branches) refuses --local and offers no local chain branch.
+# (references/integrations.md, "Local integration branch").
 #
 # A chain is a connected group of two or more items linked by dependsOn (#340 <- #341 <- #342, or a
 # diamond). Only items without an integration (and not an <F>-integrate item) are chained, so once a
@@ -80,7 +79,6 @@ case ${1:-} in
       jq -c --arg b "$(branch_for "$(jq -r .root <<<"$c")" "$(jq -r .title <<<"$c")")" \
         '{items, branch: $b, question: "group \(.items | join(", ")) into \($b)?"}' <<<"$c"
     done
-    ! is_cloud "$2" || exit 0
     local_chains "$2" | while IFS= read -r c; do
       jq -c --arg b "$(branch_for "$(jq -r .root <<<"$c")" "$(jq -r .title <<<"$c")" chain)" \
         '{items, branch: $b, parent, question: "run \(.items | join(", ")) on the local branch \($b), one PR into \(.into)?"}' <<<"$c"
@@ -93,13 +91,11 @@ case ${1:-} in
     plan=$2
     shift 2
     islocal=false; [[ ${1:-} != --local ]] || { islocal=true; shift; }
-    ! $islocal || no_cloud "$plan"
     for id in "$@"; do
       c=$(chains "$plan" | jq -c --arg id "$id" 'select(.items | index($id))')
       if [[ -z $c ]]; then
         c=$(local_chains "$plan" | jq -c --arg id "$id" 'select(.items | index($id))')
         [[ -n $c ]] || { echo "$id is in no offered chain" >&2; exit 1; }
-        no_cloud "$plan"
         f=$(next_id "$plan")
         b=$(branch_for "$(jq -r .root <<<"$c")" "$(jq -r .title <<<"$c")" chain)
         apply "$plan" --arg f "$f" --arg b "$b" --argjson c "$c" \
@@ -120,7 +116,7 @@ case ${1:-} in
   share)
     plan=$2 slug=$(slug "${3:?usage: chains.sh share <plan-file> <slug> [--local]}" 50)
     [[ -n $slug ]] || { echo "empty slug" >&2; exit 1; }
-    islocal=false; [[ ${4:-} != --local ]] || { islocal=true; no_cloud "$plan"; }
+    islocal=false; [[ ${4:-} != --local ]] || islocal=true
     f=$(next_id "$plan")
     apply "$plan" --arg f "$f" --arg b "feature/$slug" --arg base "$default_base" --argjson local "$islocal" \
       '.integrations = (.integrations // []) + [{id: $f, title: $b, branch: $b, base: $base, pr: null, state: "open"}

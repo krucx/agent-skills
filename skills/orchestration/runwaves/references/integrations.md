@@ -49,9 +49,6 @@ scripts:
 - The `<F>-integrate` worker pushes the branch for the first time and opens the final PR as
   usual; its CI is the run's only CI.
 
-Workers must be on this machine's host (the branches live in this clone): never pair a local
-integration with cloud workspaces (`cloud: true` in the plan makes `chains.sh` and `epic.sh` refuse `--local`).
-
 ## Local chain branch (opt-in at the go)
 
 Inside a GitHub integration, a sequential chain still waits for a sub-PR and its CI on every link.
@@ -78,9 +75,6 @@ go message with the rest. Yes → `chains.sh accept <plan-file> <ID>` adds a nes
   chain it joins.
 - The parent stays open (or `held`, when a chain is held) until each chain has landed; an
   all-dropped chain releases it.
-
-Local only, like a local integration: a plan with `cloud: true` (cloud workspaces cannot reach this
-clone) gets no local chain offers, and `accept` on one, like any `--local`, is refused.
 
 ## Merge gate (script-enforced)
 
