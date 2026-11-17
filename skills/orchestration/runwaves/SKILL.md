@@ -35,7 +35,9 @@ On Paradev, first `<skill-dir>/scripts/preflight.sh`; non-zero exit: read
   table `<skill-dir>/scripts/table.sh --go <plan-file>` prints, as printed: waves, critical marks
   (every longest dependency chain) and targets come from the plan. To move an item, change its
   `dependsOn` or state and reshow; never edit the table. Squash-only repos: dependents wait for the
-  merge.
+  merge. `<plan-file>` before the go is a draft JSON in your scratch folder (`runId`, `items` with
+  `id`, `title`, `state` `planned`, `dependsOn`; [schema](references/plan-schema.md)): loop saves it
+  with `plan.sh write`, orca and fanout drop it.
 
 ## Go message
 

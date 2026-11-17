@@ -216,6 +216,33 @@ gap: `~/.claude/skills/orchestrator` links to `~/.agents/skills/orchestrator`, w
 `skills/orchestrator` path in the main clone, which no longer exists. A fresh session outside
 this repo therefore has no runwaves skill until it is reinstalled (`install.sh`).
 
+### Orca dry run on dummy data, 2026-11-17
+
+Run `20261117-0730` on a throwaway local repo (no remote, registered in Orca as `runwaves-dummy`, with
+the skill linked in), so no plan file, branch or PR touched a real repo. The coordinator was a Claude
+Code terminal in an Orca workspace of that repo, given four free-text tasks: T1 `--help` for
+`add.sh`, T2 a `test.sh` that "comes after T1", T3 a README section, T4 an `.editorconfig`.
+
+- Planning: `runwaves` loaded, `table.sh --go` showed waves 1 (T1, T3, T4) and 2 (T2), critical
+  path T1 → T2, "Backend: orca, 4 items" after the go. Only `orchestration` was loaded; the
+  coordinator never loaded `superset:orchestrate` or any `paradev/` file.
+- Dispatch: T1, T3 and T4 started at once in their own worktrees; T2 started on T1's branch when
+  T1's `worker_done` arrived. All four succeeded; one final per-task report; no PRs (free text).
+- Found: `<plan-file>` before the go was undefined for every backend, so the coordinator read
+  `table.sh` and `plan.sh` to improvise one. SKILL.md now says the draft lives in the scratch folder.
+  It also read `orca.md` before the go, which SKILL.md already forbids; not changed.
+
+Measured with `usage.py <coordinator transcript> <worker transcripts>`:
+
+| Run | Orchestrator turns | Chat-only turns | Orchestrator output | Worker output | Output share | Orchestrator cache-read | Worker cache-read | Cache-read share | Peak context |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Orca dry run `20261117-0730` (4 tiny tasks, 1 chain) | 27 | 5 | 9K | 5K | 180% | 1.4M | 0.85M | 165% | 66K |
+
+The share is far above target for the same reason as section 11's dry run: each worker took 5 or 6
+turns, so the coordinator's fixed cost (skill, `orchestration` guide, plan, go) dominates. Per item
+it is 6.8 turns, 2.3K output and 0.35M cache-read, against 12.3, 3.3K and 0.6M in section 11 and
+12.6, 9.5K and 1.7M in the 12-issue baseline.
+
 ### Measured runs: not run
 
 The loop run with a nested local chain and the small fanout run both need a Paradev host. The
