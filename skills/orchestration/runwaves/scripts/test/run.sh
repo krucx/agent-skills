@@ -1817,8 +1817,12 @@ expect "orca dispatch: named after the branch" "$args" $'--name\nissue-20-add-cs
 expect "orca dispatch: from the target" "$args" $'--base-branch\nmain'
 spec=$(cat "$FIX/orca-spec")
 expect "orca dispatch: spec names the skill in plain text" "$spec" "Use the implement skill to do #20."
-expect "orca dispatch: spec ends in the DONE block" "$spec" "RUNWAVES_WORKER_DONE"
-expect "orca dispatch: worker_done carries the block" "$spec" "worker_done report (and any blocked report) must contain that block verbatim"
+expect "orca dispatch: spec asks for a PR into the target" "$spec" "Finish with a PR into main"
+expect "orca dispatch: spec stays within the item" "$spec" "Other agents are changing this repo in parallel (#21): stay within #20."
+for proto in WORKER_DONE WORKER_BLOCKED WORKER_WAITING "gh pr checks" "Docker Compose" "criteria:"; do
+  expect_not "orca dispatch: no worker protocol ($proto)" "$spec" "$proto"
+done
+expect_exit "orca dispatch: the spec is short" "$(($(wc -c <"$FIX/orca-spec") < 600))" 1
 expect_not "orca dispatch: no Paradev workspace" "$(cat "$FIX/create.args" 2>/dev/null)" "--project"
 
 dispatch_sandbox; orca_on; jq '.owner = "term_me"' "$plan" >"$plan.tmp" && mv "$plan.tmp" "$plan"
@@ -1844,6 +1848,15 @@ expect "orca status: criteria from the block" "$(row '#1' .worker.criteria)" '{"
 expect "orca status: the branch's PR" "$(row '#1' .pr.number)" "5"
 expect "orca status: waiting on a human is blocked with no reason" "$(row '#2' .agent)" '"reason":null,"state":"blocked"'
 expect "orca status: an unknown dispatch is missing" "$(row '#3' .missing)" "true"
+jq -n '[{type: "worker_done", subject: "#1 done: PR #5", body: "Opened PR #5; 2/2 checks green, npm test passed.",
+         payload: {dispatchId: "ctx_1"}}]' >"$FIX/orca-inbox.json"
+rows=$("$scripts/status.sh" - "$plan")
+expect "orca status: a plain report counts as done" "$(row '#1' .worker.marker)" '"done"'
+expect "orca status: the report is checked" "$(row '#1' .worker.checked)" "2/2 checks green, npm test passed."
+echo '{"dispatchId": "ctx_1", "runId": "run_1", "state": "failed", "terminal": "term_1"}' >"$FIX/orca-workers/ctx_1"
+rows=$("$scripts/status.sh" - "$plan")
+expect "orca status: a failed dispatch's report is a block" "$(row '#1' .worker)" '"marker":"blocked","reason":"Opened PR #5'
+echo '{"dispatchId": "ctx_1", "runId": "run_1", "state": "succeeded", "terminal": "term_1"}' >"$FIX/orca-workers/ctx_1"
 
 out=$("$scripts/cycle.sh" - "$plan" 2>&1); code=$?
 expect_exit "orca cycle: needs the model" $code 10

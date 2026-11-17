@@ -178,8 +178,12 @@ others=$(jq -r --arg id "$id" '[.items[] | select(.id != $id) | .id] | join(", "
   else
     [[ -z $text ]] || printf '%s\n\n' "$text"
   fi
-  printf '%s\n' "You're one of several agents, each in its own worktree of this repo, coordinated by a" \
-    "runwaves coordinator; the others work on ${others:-no other items}."
+  if [[ $host == orca ]]; then
+    printf '%s\n' "Other agents are changing this repo in parallel (${others:-no other items}): stay within $id."
+  else
+    printf '%s\n' "You're one of several agents, each in its own worktree of this repo, coordinated by a" \
+      "runwaves coordinator; the others work on ${others:-no other items}."
+  fi
   [[ -z $task ]] || printf '%s\n' "- $id is a label in this run's plan only, not a tracker ticket; don't fetch it. The task" \
     "  is $task."
   if [[ -n $integrates ]]; then
@@ -198,72 +202,85 @@ others=$(jq -r --arg id "$id" '[.items[] | select(.id != $id) | .id] | join(", "
       printf '%s\n' "  Do not merge the PR yourself: the coordinator merges it into $target once its checks pass." ""
     else printf '%s\n' "  Do not merge the final PR; the user reviews and merges it." ""; fi
   fi
-  printf '%s\n' "- Stay within $id; no drive-by changes elsewhere (other branches are editing this code too)." \
+  [[ $host == orca ]] || printf '%s\n' "- Stay within $id; no drive-by changes elsewhere (other branches are editing this code too)." \
     "- Keep shared machine resources apart: put $branch in Docker Compose project names, container" \
     "  names, scratch or data directories and temp files; bind no fixed host ports."
   if [[ -n $stacked ]]; then
     m=$(gh pr list --head "$base" --state all --json number --jq '.[0].number // empty' 2>/dev/null || true)
-    printf '%s\n' "- Stacked: this branch starts from $base (PR #${m:-?}, unmerged). Put \"Stacked on #${m:-?}; merge" \
+    [[ $host != orca ]] || printf '%s\n' "- Stacked on #${m:-?} ($base, unmerged): say \"Stacked on #${m:-?}; merge that first\" in the PR" \
+      "  description, and rebase onto origin/$target once it merges."
+    [[ $host == orca ]] || printf '%s\n' "- Stacked: this branch starts from $base (PR #${m:-?}, unmerged). Put \"Stacked on #${m:-?}; merge" \
       "  that first\" in the PR description. Note the parent tip now (\`git rev-parse HEAD\`, before your" \
       "  first commit). When #${m:-?} merges: \`git fetch origin && git rebase --onto origin/$target <that tip>" \
       "  HEAD\`, \`git push --force-with-lease\`, and delete the \"merge that first\" line (a squash-merge" \
       "  leaves the parent's commits on your branch, so the PR conflicts until then)."
   fi
-  if [[ $ilocal == true && -z $integrates ]]; then
-    printf '%s\n' "- $target is a local integration branch (no sub-PRs, no CI per task): open no PR and push nothing." \
-      "  Commit on $branch and leave it there; the coordinator merges it into $target on this machine, and" \
-      "  CI runs once on the final $target PR. Need a human decision? Ask it plainly and stop."
+  if [[ $host == orca ]]; then
+    # Orca's preamble already covers reporting, questions and escalation: send the end state only.
+    if [[ -n $integrates ]]; then :
+    elif [[ $ilocal == true ]]; then
+      printf '%s\n' "- Commit on this branch; open no PR and push nothing ($target is a local integration branch)." \
+        "  Run the full test command before your last commit and put \`local: <command> passed\` in your report."
+    else
+      printf '%s\n' "- Finish with a PR into $target (\`gh pr create --base $target\`) whose checks pass. No checks:" \
+        "  run the tests and put \`no PR checks; local: <command> passed\` in your report."
+    fi
+    printf '%s\n' "- In your report, say what you verified."
   else
-    printf '%s\n' "- Your goal is an open PR: once committed, push and \`gh pr create --base $target\` yourself, even if your skill" \
-      "  stops at a commit. Need a human decision? Ask it plainly and stop."
+    if [[ $ilocal == true && -z $integrates ]]; then
+      printf '%s\n' "- $target is a local integration branch (no sub-PRs, no CI per task): open no PR and push nothing." \
+        "  Commit on $branch and leave it there; the coordinator merges it into $target on this machine, and" \
+        "  CI runs once on the final $target PR. Need a human decision? Ask it plainly and stop."
+    else
+      printf '%s\n' "- Your goal is an open PR: once committed, push and \`gh pr create --base $target\` yourself, even if your skill" \
+        "  stops at a commit. Need a human decision? Ask it plainly and stop."
+    fi
+    printf '%s\n' "- If you hit the same obstacle a second time (same failing command or missing access), don't" \
+      "  retry: print RUNWAVES_WORKER_BLOCKED, \`reason:\` the obstacle, \`needs:\` what would clear" \
+      "  it, and stop. Once the PR is open, a PR check you cannot fix is not an obstacle: it goes in" \
+      "  \`checked:\`." \
+      "- Before ending a turn with your own background work running (e.g. code-review subagents), or" \
+      "  while waiting on something external that finishes by itself, print this once per wait (not" \
+      "  per check, never while actively implementing), the marker on a line of its own:" \
+      "  RUNWAVES_WORKER_WAITING" "  item: $id" "  waiting-on: <what you are waiting for>" \
+      "  resumes-when: <what ends the wait>" \
+      "  Waiting is not blocked: a wait clears on its own, a block needs the coordinator or a human." \
+      "  If what you wait on fails or stops, that's an obstacle as above. When the wait ends, carry on" \
+      "  and finish with a block below; it replaces the wait."
+    if [[ $ilocal == true && -z $integrates ]]; then
+      printf '%s\n' "- Before every commit run the test suites that cover what you changed, and the project's full test" \
+        "  command before your last commit; a red test is yours to fix before committing." \
+        "- Done means the branch is committed and the full test command passed. In the DONE block put" \
+        "  \`pr: none (local integration)\` and in \`checked:\` the exact test command and its result, e.g." \
+        "  \"local: npm test passed\"; the coordinator merges your branch into $target only on that."
+    else
+      printf '%s\n' "- Done means every PR check passed and the PR is mergeable, not just open: never print" \
+        "  RUNWAVES_WORKER_DONE while a check is pending or red. Check cheaply: \`gh pr checks <n>" \
+        "  --watch --fail-fast >/dev/null 2>&1; echo exit=\$?\` (0 = all passed; the table itself is noise), and" \
+        "  only on a non-zero exit \`gh pr checks <n> --json name,state,bucket --jq '.[] | select(.bucket != \"pass\"" \
+        "  and .bucket != \"skipping\") | \"\\(.name): \\(.state)\"'\` for the failed names; then tail" \
+        "  \`gh run view <run-id> --log-failed\` (never green checks' logs), fix what your change caused," \
+        "  push, watch again. Then confirm no conflict:" \
+        "  \`gh pr view <n> --json mergeable,mergeStateStatus,statusCheckRollup --jq '{mergeable," \
+        "  mergeStateStatus, failing: [.statusCheckRollup[] | select(.conclusion==\"FAILURE\") | .name]}'\`;" \
+        "  on a conflict merge or rebase the base and push. A check you cannot fix goes in \`checked:\`" \
+        "  by name. If the PR has no checks at all (common on PRs into a feature branch), run the" \
+        "  project's test command locally and report it in \`checked:\`, e.g. \"no PR checks; local: npm" \
+        "  test passed\"; the coordinator merges a PR into an integration branch only on that."
+    fi
+    printf '%s\n' "- criteria: the issue's acceptance checklist (for free text, the ask, one criterion per sentence you can" \
+      "  check). Report <met>/<total>; when met < total add one indented \`unmet:\` line per criterion not" \
+      "  met or not verifiable. No checklist: report n/n over the criteria you derived and list them in" \
+      "  \`checked:\`. Omit the \`unmet:\` lines when all are met." \
+      "- Finish your last message with exactly one of these, the marker on a line of its own:" \
+      "  RUNWAVES_WORKER_DONE" "  item: $id" "  pr: <url>" "  summary: <one line>" \
+      "  checked: <what you verified against the task, and the PR's checks in a few words (\"5/5" \
+      "    green\"); name only the checks that were red or skipped>" \
+      "  criteria: <met>/<total>" \
+      "  unmet: <a criterion not met or not verifiable, quoted, and why in a few words>" "  or" \
+      "  RUNWAVES_WORKER_BLOCKED" "  item: $id" "  reason: <what stops you>" \
+      "  needs: <the decision or access required>"
   fi
-  printf '%s\n' "- If you hit the same obstacle a second time (same failing command or missing access), don't" \
-    "  retry: print RUNWAVES_WORKER_BLOCKED, \`reason:\` the obstacle, \`needs:\` what would clear" \
-    "  it, and stop. Once the PR is open, a PR check you cannot fix is not an obstacle: it goes in" \
-    "  \`checked:\`." \
-    "- Before ending a turn with your own background work running (e.g. code-review subagents), or" \
-    "  while waiting on something external that finishes by itself, print this once per wait (not" \
-    "  per check, never while actively implementing), the marker on a line of its own:" \
-    "  RUNWAVES_WORKER_WAITING" "  item: $id" "  waiting-on: <what you are waiting for>" \
-    "  resumes-when: <what ends the wait>" \
-    "  Waiting is not blocked: a wait clears on its own, a block needs the coordinator or a human." \
-    "  If what you wait on fails or stops, that's an obstacle as above. When the wait ends, carry on" \
-    "  and finish with a block below; it replaces the wait."
-  if [[ $ilocal == true && -z $integrates ]]; then
-    printf '%s\n' "- Before every commit run the test suites that cover what you changed, and the project's full test" \
-      "  command before your last commit; a red test is yours to fix before committing." \
-      "- Done means the branch is committed and the full test command passed. In the DONE block put" \
-      "  \`pr: none (local integration)\` and in \`checked:\` the exact test command and its result, e.g." \
-      "  \"local: npm test passed\"; the coordinator merges your branch into $target only on that."
-  else
-    printf '%s\n' "- Done means every PR check passed and the PR is mergeable, not just open: never print" \
-      "  RUNWAVES_WORKER_DONE while a check is pending or red. Check cheaply: \`gh pr checks <n>" \
-      "  --watch --fail-fast >/dev/null 2>&1; echo exit=\$?\` (0 = all passed; the table itself is noise), and" \
-      "  only on a non-zero exit \`gh pr checks <n> --json name,state,bucket --jq '.[] | select(.bucket != \"pass\"" \
-      "  and .bucket != \"skipping\") | \"\\(.name): \\(.state)\"'\` for the failed names; then tail" \
-      "  \`gh run view <run-id> --log-failed\` (never green checks' logs), fix what your change caused," \
-      "  push, watch again. Then confirm no conflict:" \
-      "  \`gh pr view <n> --json mergeable,mergeStateStatus,statusCheckRollup --jq '{mergeable," \
-      "  mergeStateStatus, failing: [.statusCheckRollup[] | select(.conclusion==\"FAILURE\") | .name]}'\`;" \
-      "  on a conflict merge or rebase the base and push. A check you cannot fix goes in \`checked:\`" \
-      "  by name. If the PR has no checks at all (common on PRs into a feature branch), run the" \
-      "  project's test command locally and report it in \`checked:\`, e.g. \"no PR checks; local: npm" \
-      "  test passed\"; the coordinator merges a PR into an integration branch only on that."
-  fi
-  printf '%s\n' "- criteria: the issue's acceptance checklist (for free text, the ask, one criterion per sentence you can" \
-    "  check). Report <met>/<total>; when met < total add one indented \`unmet:\` line per criterion not" \
-    "  met or not verifiable. No checklist: report n/n over the criteria you derived and list them in" \
-    "  \`checked:\`. Omit the \`unmet:\` lines when all are met." \
-    "- Finish your last message with exactly one of these, the marker on a line of its own:" \
-    "  RUNWAVES_WORKER_DONE" "  item: $id" "  pr: <url>" "  summary: <one line>" \
-    "  checked: <what you verified against the task, and the PR's checks in a few words (\"5/5" \
-    "    green\"); name only the checks that were red or skipped>" \
-    "  criteria: <met>/<total>" \
-    "  unmet: <a criterion not met or not verifiable, quoted, and why in a few words>" "  or" \
-    "  RUNWAVES_WORKER_BLOCKED" "  item: $id" "  reason: <what stops you>" \
-    "  needs: <the decision or access required>"
-  [[ $host != orca ]] || printf '%s\n' \
-    "- Your Orca worker_done report (and any blocked report) must contain that block verbatim."
 } >"$tmp/prompt"
 
 rollback() { # rollback <reason>: undo the in-progress mark; the second failure blocks the item

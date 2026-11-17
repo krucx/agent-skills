@@ -107,13 +107,13 @@ local_integ() { # local_integ <item-id>: the item's integration is a local branc
 }
 
 finish_msg() { # the follow-up for an idle worker with no PR and no DONE
-  if local_integ "$1"; then echo "Please finish: commit on your branch (no PR: $(target_of "$1") is a local integration branch), then print your RUNWAVES_WORKER_DONE block."
-  else echo "Please finish: commit, push and open the PR (gh pr create --base $(target_of "$1")), then print your RUNWAVES_WORKER_DONE block."; fi
+  if local_integ "$1"; then echo "Please finish: commit on your branch (no PR: $(target_of "$1") is a local integration branch), then $(report_ask)."
+  else echo "Please finish: commit, push and open the PR (gh pr create --base $(target_of "$1")), then $(report_ask)."; fi
 }
 
 local_test_msg() { # the follow-up when `checked` shows no passing test run
-  if local_integ "$1"; then echo "Run the project's full test command and report it in \`checked:\` as \"local: <command> passed\" ($(target_of "$1") is a local integration branch; there are no PR checks); then print your RUNWAVES_WORKER_DONE block again."
-  else echo "Run the project's tests locally (the PR has no checks) and report the result in \`checked:\`; then print your RUNWAVES_WORKER_DONE block again."; fi
+  if local_integ "$1"; then echo "Run the project's full test command and report it in \`checked:\` as \"local: <command> passed\" ($(target_of "$1") is a local integration branch; there are no PR checks); then $(report_ask) again."
+  else echo "Run the project's tests locally (the PR has no checks) and report the result in \`checked:\`; then $(report_ask) again."; fi
 }
 
 send() { # send <item-id> <text>: queue the message; flush delivers it once the plan records it

@@ -6,13 +6,15 @@ written at commit 9baa3eb; sections 11-13 record what was built and measured aft
 ## Current status (2026-11-17)
 
 - **Built**: every step of section 9, then the backends (#88, #89) and nested local chain branches
-  (#91). Script tests: 696 passed, 0 failed. SKILL.md is about 1.3K tokens (6.7K before).
+  (#91). Script tests: 706 passed, 0 failed. SKILL.md is about 1.3K tokens (6.7K before).
 - **Backends**: on an Orca host, `orca` runs every run, large or small, epics and chains
   included (decided 2026-11-17). It uses the same plan file and scripts as `loop`: `cycle.sh`
   runs once per Orca wake instead of under `watch.sh`, `dispatch.sh` starts each worker with
   `orca orchestration worker-start` in its own child worktree, `status.sh` reads Orca's dispatch
   state and `worker_done` reports, `send.sh` uses `orca orchestration send`, and `plan.sh` owns the
-  run by the Orca terminal handle. On Paradev, `fanout` takes 5 or fewer independent free-text
+  run by the Orca terminal handle. Orca workers get only the task and its end state (about 300
+  characters against 3.5K for a Paradev loop worker): Orca's preamble covers reporting, and the
+  `worker_done` report stands in for the DONE block. Fanout briefs were already the task only. On Paradev, `fanout` takes 5 or fewer independent free-text
   items, `loop` everything else.
 - **Routing**: 18/18 fresh sessions chose the expected skill (section 13), before the Orca change.
 - **Token target** (coordinator under 10% of worker spend): not shown yet. The dry runs (sections
@@ -23,8 +25,8 @@ written at commit 9baa3eb; sections 11-13 record what was built and measured aft
     The Orca dispatch states it maps (`succeeded`, `failed` and the like settle a worker) were
     read from Orca 1.4.259; others count as working.
   - A merge a human makes does not wake an Orca coordinator; "runwaves continue" picks it up.
-  - Kept on purpose: `~/.agents/orchestrator/` (saved runs resume from it). Workers now print
-    `RUNWAVES_WORKER_*`; `status.sh` still reads the older `ORCHESTRATOR_WORKER_*`.
+  - Kept on purpose: `~/.agents/orchestrator/` (saved runs resume from it). Paradev loop workers now
+    print `RUNWAVES_WORKER_*`; `status.sh` still reads the older `ORCHESTRATOR_WORKER_*`.
 
 ## 1. Baseline, measured from Claude Code transcripts
 
