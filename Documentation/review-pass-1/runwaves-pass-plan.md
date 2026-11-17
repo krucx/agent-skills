@@ -194,7 +194,8 @@ Each phrase ran twice in a fresh headless session (`claude -p "<phrase>" --allow
 --max-turns 3`, Claude Code 2.1.311, stdin closed) from an empty scratch repo whose
 `.claude/skills/runwaves` links to this branch's skill. The session also loaded the global
 `orchestration` (Orca) and `superset:orchestrate` skills, so all three competed. Only the Skill tool
-was allowed, so the first Skill call is the routing decision and nothing ran after it.
+was allowed, so the first Skill call is the routing decision and nothing ran after it. The sessions
+inherited this Orca session's environment, including `ORCA_WORKSPACE_ID`.
 
 | Phrase | Expected | Routed (2 sessions) |
 | --- | --- | --- |
@@ -208,8 +209,11 @@ was allowed, so the first Skill call is the routing decision and nothing ran aft
 | `run these 3 refactors in parallel and tell me when done` | not runwaves | none, none (asked which refactors) |
 | `have Codex review this branch and report back` | orchestration | orchestration, orchestration |
 
-All 18 sessions routed as expected. One install gap: the global `~/.claude/skills/orchestrator`
-link points at the old `skills/orchestrator` path, which no longer exists. A fresh session outside
+All 18 sessions routed as expected. Two limits: the ad-hoc fan-out phrase invoked no skill (the
+scratch repo is empty, so the session asked which refactors), which shows runwaves is not chosen but
+not that `superset:orchestrate` is; and the skill was linked per project, not installed. One install
+gap: `~/.claude/skills/orchestrator` links to `~/.agents/skills/orchestrator`, which links to the old
+`skills/orchestrator` path in the main clone, which no longer exists. A fresh session outside
 this repo therefore has no runwaves skill until it is reinstalled (`install.sh`).
 
 ### Measured runs: not run
@@ -222,12 +226,17 @@ section 12:
 
 | Run | Orchestrator turns | Chat-only turns | Orchestrator output | Worker output | Output share | Orchestrator cache-read | Worker cache-read | Cache-read share | Peak context |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Loop, nested local chain | not run | | | | | | | | |
-| Fanout, 3 free-text tasks | not run | | | | | | | | |
-| Baseline: 12 issues, 2026-11-13 (section 1) | 151 | — | 114K | 278K | 41% | 20.2M | 42.7M | 47% | 191K |
+| Loop, nested local chain | not run | not run | not run | not run | not run | not run | not run | not run | not run |
+| Fanout, 3 free-text tasks | not run | not run | not run | not run | not run | not run | not run | not run | not run |
+| Baseline: 12 issues, 2026-11-13 (section 1) | 151 | not measured | 114K | 278K | 41% | 20.2M | 42.7M | 47% | 191K |
 | Baseline: `20261114-2058` (section 12) | 192 | 41 | 73K | 443K | 16.6% | 22.1M | 46.4M | 47.7% | 157K |
 
 Acceptance criteria of #92:
 
-- [ ] Measurement recorded and compared with the Nov 2026 baseline: unmet. Needs a Paradev host (above).
-- [x] Each trigger phrase routes correctly in a fresh session: met (table above).
+The section 1 row uses the like-for-like figures at turn 151 (20.2M cache-read, 191K peak), not the
+25.6M and 224K first recorded for the baseline.
+
+- [ ] Measurement recorded and compared with the Nov 2026 baseline: unmet, deferred to the user. Needs
+  a Paradev host (above).
+- [x] Each trigger phrase routes correctly in a fresh session: met for every phrase in the
+  description, with the skill linked per project (limits above).
