@@ -7,6 +7,8 @@
 #   $FIX/orca-start.args      the arguments of the last worker-start call, one per line;
 #                             $FIX/orca-spec: the spec file it was given
 #   $FIX/orca-send.log        send calls: "<to> <body>"
+#   $FIX/orca-graph.log       run-create, task-create and task-update calls, one line each
+#   $FIX/orca-task-fail       when present, task-create fails
 # worker-start answers dispatch ctx_new, terminal term_new, workspace $FIX/orca-wt (if it exists).
 set -euo pipefail
 arg() { local want=$1; shift; while (($#)); do [[ $1 == "$want" ]] && { echo "$2"; return; }; shift; done; }
@@ -26,5 +28,12 @@ case "$1 ${2:-}" in
     jq -c '{ok: true, result: .}' "$f" ;;
   "orchestration inbox") jq -nc --argjson m "$(cat "$FIX/orca-inbox.json" 2>/dev/null || echo '[]')" '{ok: true, result: {messages: $m}}' ;;
   "orchestration send") echo "$(arg --to "$@") $(arg --body "$@")" >>"$FIX/orca-send.log"; echo '{"ok":true}' ;;
+  "orchestration run-create") echo "run-create" >>"$FIX/orca-graph.log"; echo '{"ok":true,"result":{"runId":"run_g"}}' ;;
+  "orchestration task-create")
+    [[ ! -f $FIX/orca-task-fail ]] || { echo "task-create refused" >&2; exit 1; }
+    n=$(($(grep -c '^task-create' "$FIX/orca-graph.log" 2>/dev/null || true) + 1))
+    echo "task-create $(arg --run "$@") task_$n $(arg --task-title "$@") deps=$(arg --deps "$@")" >>"$FIX/orca-graph.log"
+    echo "{\"ok\":true,\"result\":{\"task\":{\"id\":\"task_$n\"}}}" ;;
+  "orchestration task-update") echo "task-update $(arg --id "$@") $(arg --status "$@") $(arg --result "$@")" >>"$FIX/orca-graph.log"; echo '{"ok":true}' ;;
   *) echo "orca shim: unsupported: $*" >&2; exit 1 ;;
 esac

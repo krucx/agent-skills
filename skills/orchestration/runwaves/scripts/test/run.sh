@@ -1864,6 +1864,45 @@ expect "orca cycle: the DONE item goes to acceptance" "$out" '"kind":"accept","i
 expect "orca cycle: a worker question surfaces" "$out" '"kind":"question","item":"#2"'
 expect_exit "orca cycle: no tag moves on Orca" "$([[ -f $FIX/tags.log ]] && echo moved || echo none)" none
 
+expect "orca graph: one Orca run for the plan" "$(jq -r .orcaRun "$plan")" "run_g"
+expect "orca graph: every item gets a Task" "$(jq -c '[.items[].orcaTask]' "$plan")" '["task_1","task_2","task_3"]'
+expect "orca graph: the run is recorded as an event" "$(jq -c '[.events[] | select(.action == "graph")] | length' "$plan")" "4"
+
+sandbox; orca_on
+plan_with "[$(item '#1' done ctx_1 term_1), $(item '#2' queued '' ''), $(item '#3' queued '' ''), $(item '#4' skipped '' '' 'out of scope')]" '{"owner": "term_me"}'
+jq '(.items[] | select(.id == "#1")) |= (.pr = "https://github.com/acme/app/pull/5")
+    | (.items[] | select(.id == "#2")).dependsOn = ["#1"] | (.items[] | select(.id == "#3")).dependsOn = ["#1", "#2"]
+    | (.items[] | select(.id == "#2")).state = "waiting" | (.items[] | select(.id == "#3")).state = "waiting"' "$plan" >"$plan.tmp" && mv "$plan.tmp" "$plan"
+mkdir -p "$FIX/orca-workers"; echo '{"dispatchId": "ctx_1", "runId": "run_1", "state": "succeeded", "terminal": "term_1"}' >"$FIX/orca-workers/ctx_1"
+"$scripts/cycle.sh" - "$plan" >/dev/null 2>&1
+log=$(cat "$FIX/orca-graph.log")
+expect "orca graph: Tasks in dependency order, deps as Task IDs" "$log" 'task-create run_g task_3 #3  deps=["task_1","task_2"]'
+expect "orca graph: a dependency's Task comes first" "$log" 'task-create run_g task_2 #2  deps=["task_1"]'
+expect "orca graph: a done item's Task is completed with its PR" "$log" "task-update task_1 completed https://github.com/acme/app/pull/5"
+expect "orca graph: a skipped item's Task fails" "$log" "task-update task_4 failed skipped: out of scope"
+expect_not "orca graph: a waiting item's Task is left to Orca" "$log" "task-update task_2"
+"$scripts/cycle.sh" - "$plan" >/dev/null 2>&1
+expect "orca graph: a second cycle creates and updates nothing" "$(grep -c . "$FIX/orca-graph.log")" "7"
+orca_off
+
+sandbox; orca_on
+plan_with "[$(item '#1' queued '' '')]" '{"owner": "term_me", "orcaRun": "run_g"}'
+touch "$FIX/orca-task-fail"
+out=$("$scripts/cycle.sh" - "$plan" 2>&1)
+expect "orca graph: a failed task-create is reported" "$out" "Orca task-create for #1 failed"
+expect "orca graph: and retried next cycle (no Task recorded)" "$(jq -c '.items[0].orcaTask' "$plan")" "null"
+orca_off
+
+dispatch_sandbox; orca_on; jq '.owner = "term_me" | .items[0].orcaTask = "task_9"' "$plan" >"$plan.tmp" && mv "$plan.tmp" "$plan"
+mkdir -p "$FIX/orca-wt"; git -C "$FIX/orca-wt" init -q -b krucx/issue-20-add-csv-export-please
+dispatch >/dev/null 2>&1
+expect "orca dispatch: the worker is a child of the item's Task" "$(cat "$FIX/orca-start.args")" $'--parent\ntask_9'
+orca_off
+sandbox; orca_on
+plan_with "[$(item '#1' in-progress ctx_1 term_1), $(item '#2' in-progress ctx_2 term_2), $(item '#3' in-progress ctx_gone '')]" '{"owner": "term_me"}'
+mkdir -p "$FIX/orca-workers"
+echo '{"dispatchId": "ctx_2", "runId": "run_1", "state": "running", "terminal": "term_2", "waitingOnHuman": true}' >"$FIX/orca-workers/ctx_2"
+
 "$scripts/send.sh" "$plan" '#2' "use the staging key" >/dev/null; code=$?
 expect_exit "orca send: exits 0" $code 0
 expect "orca send: goes to the dispatch" "$(cat "$FIX/orca-send.log")" "dispatch:ctx_2 use the staging key"

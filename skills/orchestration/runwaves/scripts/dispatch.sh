@@ -294,8 +294,10 @@ rollback() { # rollback <reason>: undo the in-progress mark; the second failure 
 
 if [[ $host == orca ]]; then
   case $preset in agy) oagent=antigravity ;; *) oagent=$preset ;; esac
+  # The item's Task in Orca's graph (cycle.sh): the worker's Task is its child.
+  parent=(); otask=$(item '.orcaTask // empty'); [[ -z $otask ]] || parent=(--parent "$otask")
   if ! orca_cli orchestration worker-start --spec-file "$tmp/prompt" --worktree new-child --name "$branch" \
-    --base-branch "$base" --agent "$oagent" --task-title "$id $(printf '%s' "$title" | cut -c1-50)" \
+    --base-branch "$base" --agent "$oagent" ${parent[@]+"${parent[@]}"} --task-title "$id $(printf '%s' "$title" | cut -c1-50)" \
     --json </dev/null >"$tmp/created" 2>"$tmp/err"; then
     reason=$(head -n 1 "$tmp/err" | cut -c1-200)
     [[ -n $reason ]] || reason=$(jq -r '.. | objects | (.failedStage // .message // empty)' "$tmp/created" 2>/dev/null | head -n 1)

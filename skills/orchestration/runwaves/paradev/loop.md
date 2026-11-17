@@ -6,7 +6,7 @@ Never write jq against the plan: only `plan.sh write` changes it.
 
 | User says | Mode |
 | --- | --- |
-| items, `feature #400`, `feature: <text>`, free text | Run: [plan.md](plan.md) planning, dispatch, then steps 1-3 |
+| items, `feature #400`, `feature: <text>`, free text | Run: SKILL.md planning, dispatch, then steps 1-3 |
 | "continue" | Run preflight (`--mode continue`), then steps 1-3 on the saved plan |
 | "report back" / "status" | `preflight.sh --mode report`, then `table.sh`; never starts or messages a worker |
 | "close" | `preflight.sh --mode close`, `plan.sh close`, then step 3 |
