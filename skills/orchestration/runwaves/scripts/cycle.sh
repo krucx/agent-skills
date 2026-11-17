@@ -3,6 +3,9 @@
 # function of the plan and the status rows, so the model only sees what needs judgment.
 #
 # Usage (inside the repo): cycle.sh [--dry-run] <project-id> <plan-file>
+#   On Orca (common.sh backend) <project-id> is `-`: status comes from Orca's dispatches, workers
+#   start through `orca orchestration worker-start`, and there are no sidebar tags or notification.
+#   Run it once per Orca wake and at the go; never in a loop (Orca wakes the coordinator).
 #
 # In order: heartbeat; status.sh once; reconcile; transitions; acceptance hand-off; merge gate;
 # integrations; dispatch; tags re-applied; finished detection. Every action appends a plan event;
@@ -34,7 +37,8 @@ dry=''
 project=$1 plan=$2
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/common.sh"
-cli=$(command -v superset || command -v paradev || command -v pdev) ||
+host=$(backend)
+[[ $host == orca ]] || cli=$(command -v superset || command -v paradev || command -v pdev) ||
   { echo "cycle: Paradev CLI not found" >&2; exit 1; }
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/cycle.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT
@@ -103,20 +107,20 @@ local_integ() { # local_integ <item-id>: the item's integration is a local branc
 }
 
 finish_msg() { # the follow-up for an idle worker with no PR and no DONE
-  if local_integ "$1"; then echo "Please finish: commit on your branch (no PR: $(target_of "$1") is a local integration branch), then print your ORCHESTRATOR_WORKER_DONE block."
-  else echo "Please finish: commit, push and open the PR (gh pr create --base $(target_of "$1")), then print your ORCHESTRATOR_WORKER_DONE block."; fi
+  if local_integ "$1"; then echo "Please finish: commit on your branch (no PR: $(target_of "$1") is a local integration branch), then print your RUNWAVES_WORKER_DONE block."
+  else echo "Please finish: commit, push and open the PR (gh pr create --base $(target_of "$1")), then print your RUNWAVES_WORKER_DONE block."; fi
 }
 
 local_test_msg() { # the follow-up when `checked` shows no passing test run
-  if local_integ "$1"; then echo "Run the project's full test command and report it in \`checked:\` as \"local: <command> passed\" ($(target_of "$1") is a local integration branch; there are no PR checks); then print your ORCHESTRATOR_WORKER_DONE block again."
-  else echo "Run the project's tests locally (the PR has no checks) and report the result in \`checked:\`; then print your ORCHESTRATOR_WORKER_DONE block again."; fi
+  if local_integ "$1"; then echo "Run the project's full test command and report it in \`checked:\` as \"local: <command> passed\" ($(target_of "$1") is a local integration branch; there are no PR checks); then print your RUNWAVES_WORKER_DONE block again."
+  else echo "Run the project's tests locally (the PR has no checks) and report the result in \`checked:\`; then print your RUNWAVES_WORKER_DONE block again."; fi
 }
 
 send() { # send <item-id> <text>: queue the message; flush delivers it once the plan records it
   local ws t
   [[ -z $dry ]] || return 0
   ws=$(field "$1" .workspace); t=$(rowfield "$1" .agent.terminal); [[ -n $t ]] || t=$(field "$1" .terminal)
-  [[ -n $ws && -n $t ]] || return 1
+  [[ -n $ws && ( -n $t || $host == orca ) ]] || return 1
   jq -nc --arg text "$2" --arg id "$1" '{text: $text, id: $id}' >>"$scratch/sends"
 }
 
@@ -165,7 +169,7 @@ reconcile() {
     if [[ $state == in-progress && -z $(field "$id" .workspace) ]]; then
       # Dispatched but never recorded: look the workspace up by branch.
       local branch; branch=$(field "$id" .branch); found=''
-      if [[ -n $branch ]] && found=$("$cli" workspaces list --local --project "$project" --search "$branch" --json 2>/dev/null </dev/null |
+      if [[ $host != orca && -n $branch ]] && found=$("$cli" workspaces list --local --project "$project" --search "$branch" --json 2>/dev/null </dev/null |
           jq -r --arg b "$branch" '[.[] | select(.branch == $b) | .id][0] // empty'); [[ -n $found ]]; then
         upd "$id" '.workspace = $w' --arg w "$found"
         ev "$id" reconciled "adopted workspace $found for branch $branch"
@@ -501,7 +505,7 @@ done
 # --- 9. tags, finished ------------------------------------------------------------------------
 flush
 while IFS=$'\t' read -r id ws state; do
-  [[ -n $id && -n $ws ]] || continue
+  [[ -n $id && -n $ws && $host != orca ]] || continue  # Orca has no sidebar groups
   [[ $fresh != *" $id "* ]] || continue  # dispatch.sh tagged it
   want=$(group_of_state "$state"); [[ -n $want ]] || continue
   have=$(jq -r --arg id "$id" '[.[] | select(.item == $id)][0].group // empty' <<<"$ROWS")
@@ -528,7 +532,7 @@ if jq -e '(.items | length) > 0
   blocked=$(jq '[.items[] | select(.state == "blocked")] | length' <<<"$P")
   if jq -e '(.events // []) | any(.action == "finished") | not' <<<"$P" >/dev/null; then
     ev null finished "$review in review, $blocked blocked"
-    [[ -n $dry ]] || "$cli" notifications show "Orchestrator finished" --body "$review in review, $blocked blocked" --sound >/dev/null 2>&1 || true
+    [[ -n $dry || $host == orca ]] || "$cli" notifications show "Runwaves finished" --body "$review in review, $blocked blocked" --sound >/dev/null 2>&1 || true
   fi
   if jq -e 'all(.items[]; .state == "done" or .state == "skipped")
       and all((.integrations // [])[]; .state == "merged")' <<<"$P" >/dev/null; then

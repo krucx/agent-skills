@@ -5,7 +5,7 @@ from Claude Code, Codex, OpenCode, Antigravity, Gemini CLI, Hermes and any other
 
 | Skill | What it does |
 | --- | --- |
-| [runwaves](skills/orchestration/runwaves/SKILL.md) | Plans a batch of tracker issues, an epic ("runwaves feature #400") or free-text work into waves and runs them through parallel workers. On Orca it hands the waves to Orca's orchestration skill; small Paradev runs go through `superset:orchestrate` (1 or 2 tasks share the current workspace, 3 or more get one new sidebar workspace each); everything else gets a PR per task, a saved, resumable plan and In Progress, In Review, Done and Blocked groups. For an ad-hoc fan-out without runwaves, use those skills directly. |
+| [runwaves](skills/orchestration/runwaves/SKILL.md) | Plans a batch of tracker issues, an epic ("runwaves feature #400") or free-text work into waves and runs them through parallel workers, a PR per task, with a saved, resumable plan. On Orca every run uses Orca workers, one child worktree per task. On Paradev, small free-text runs go through `superset:orchestrate` (1 or 2 tasks share the current workspace, 3 or more get one new sidebar workspace each); everything else uses the Paradev CLI with In Progress, In Review, Done and Blocked groups. For an ad-hoc fan-out without runwaves, use Orca's or Paradev's own skills directly. |
 
 ## Install
 
@@ -56,7 +56,10 @@ continue" resumes a run: it starts items that have become ready and watches agai
 close" ends a run that still has blocked or waiting items; they're kept as carry-over, and the
 next run offers to pick them up again. Workspaces are never archived or deleted.
 
-A run follows one loop. `preflight.sh` checks tools, auth, host, project, plan ownership and
+A run follows one loop. On Orca, `cycle.sh` runs once each time Orca wakes the coordinator (a worker
+finished or asked something) instead of `watch.sh`; workers start through `orca orchestration
+worker-start`, there are no sidebar groups or summary page, and the rest is the same. On Paradev,
+`preflight.sh` checks tools, auth, host, project, plan ownership and
 groups in one call. The coordinating agent plans (tracker lookup, free text split into tasks, dependencies)
 and sends one go message with every question at once; its plan table comes from `table.sh --go`, which
 works out each item's wave and marks the critical path (every longest dependency chain). Then `watch.sh` runs `cycle.sh`
@@ -72,7 +75,7 @@ page. Rarely needed detail lives in `references/` (`integrations.md`, `approval.
 
 Each repo has one active run at a time. The plan lives in
 `~/.agents/orchestrator/<owner>-<repo>.json` (the folder keeps its pre-rename name so existing runs resume), and finished runs move to
-`~/.agents/orchestrator/history/`. The plan records which Paradev terminal owns the run:
+`~/.agents/orchestrator/history/`. The plan records which Paradev or Orca terminal owns the run:
 
 - A second run on the same repo is refused while the owner is alive.
 - A run whose owner is gone, or hasn't sent a heartbeat for 45 minutes, can be taken over. If
@@ -142,8 +145,8 @@ a new folder named after it. To change the mapping later, edit that file, or run
 
 ### Tests
 
-The scripts have a test suite that runs against fake `superset` and `gh` commands, so it needs no
-Paradev host or GitHub access:
+The scripts have a test suite that runs against fake `superset`, `orca` and `gh` commands, so it
+needs no Paradev host, Orca or GitHub access:
 
 ```bash
 bash skills/orchestration/runwaves/scripts/test/run.sh
@@ -151,7 +154,7 @@ bash skills/orchestration/runwaves/scripts/test/run.sh
 
 ### Requirements
 
-`bash`, `jq`, the GitHub CLI (`gh`, signed in), and the Paradev CLI with this machine's host
-running. `superset`, `paradev` and `pdev` are the same CLI, and any of the three names works; the scripts use
+`bash`, `jq`, the GitHub CLI (`gh`, signed in), and on Orca the `orca` CLI, or on Paradev the
+Paradev CLI with this machine's host running. `superset`, `paradev` and `pdev` are the same CLI, and any of the three names works; the scripts use
 whichever is on PATH. Pull requests must live on GitHub; the tracker can be GitHub
 Issues, Linear, or Jira (whatever the harness can reach).

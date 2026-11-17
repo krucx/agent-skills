@@ -1,7 +1,8 @@
 # Worker prompt
 
 Built and sent by `dispatch.sh` (exact wording there). First line: Claude, Hermes `/<skill> <ID>`;
-Codex `$<skill> <ID>`; others `Use the <skill> skill to do <ID>.` Then, in order:
+Codex `$<skill> <ID>`; others, and every worker on Orca (Orca's preamble comes first), `Use the
+<skill> skill to do <ID>.` Then, in order:
 
 - free text: the `ask`, labelled as the user's verbatim words and the whole scope, then any
   `notes`, labelled as context adding no work (older plan: `text`, unlabelled); tracker items get
@@ -23,11 +24,11 @@ Codex `$<skill> <ID>`; others `Use the <skill> skill to do <ID>.` Then, in order
 - the goal is an open PR: push and `gh pr create --base <target>` (the item's integration branch,
   else the default branch) even if the skill stops at a commit; ask a human
   decision plainly and stop;
-- the same obstacle twice (same failing command or missing access): stop, print `ORCHESTRATOR_WORKER_BLOCKED` with
+- the same obstacle twice (same failing command or missing access): stop, print `RUNWAVES_WORKER_BLOCKED` with
   `reason:` the obstacle, `needs:` what clears it; once the PR is open, an unfixable PR check is
   not an obstacle but goes in `checked:` (a block after the PR exists would land in `in-review`);
 - before ending a turn with its own background work running (e.g. code-review subagents), or
-  waiting on something external that clears itself: print `ORCHESTRATOR_WORKER_WAITING` (below) once per wait, never
+  waiting on something external that clears itself: print `RUNWAVES_WORKER_WAITING` (below) once per wait, never
   per poll or while implementing. Waiting is not blocked (a block needs the coordinator or user);
   what it waits on failing is an obstacle; a later DONE/BLOCKED block replaces the wait;
 - done = every PR check passed and the PR is mergeable; never DONE while a check is pending or
@@ -47,12 +48,14 @@ Codex `$<skill> <ID>`; others `Use the <skill> skill to do <ID>.` Then, in order
   worker can check); DONE reports `criteria: <met>/<total>` after `checked:` and, when met < total, one
   indented `unmet:` line per criterion not met or not verifiable, quoted with why in a few words; no
   checklist: `n/n` over the criteria the worker derived, listed in `checked:`;
-- end the last message with exactly one block, the marker on its own line (`status.sh` ignores
+- end the last message with exactly one block, the marker on its own line; on Orca the
+  `worker_done` report carries it verbatim (`status.sh` reads it there, still accepts the older
+  `ORCHESTRATOR_WORKER_*` markers, and ignores
   mid-sentence markers and blocks still holding `<placeholders>`, so the prompt's own templates
   aren't read as reports):
 
 ```text
-ORCHESTRATOR_WORKER_DONE
+RUNWAVES_WORKER_DONE
 item: <ID>
 pr: <url>
 summary: <one line>
@@ -63,7 +66,7 @@ criteria: <met>/<total>
 ```
 
 ```text
-ORCHESTRATOR_WORKER_BLOCKED
+RUNWAVES_WORKER_BLOCKED
 item: <ID>
 reason: <what stops you>
 needs: <the decision or access required>
@@ -74,7 +77,7 @@ the coordinator skips the worker while it's the latest block; still latest after
 `stale`, which gets a screen check instead.
 
 ```text
-ORCHESTRATOR_WORKER_WAITING
+RUNWAVES_WORKER_WAITING
 item: <ID>
 waiting-on: <what you are waiting for>
 resumes-when: <what ends the wait>

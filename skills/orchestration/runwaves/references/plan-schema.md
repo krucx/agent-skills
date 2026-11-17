@@ -14,7 +14,10 @@
 ```
 
 - `runId` is derived by `plan.sh write` from `startedAt` at creation, in `YYYYMMDD-HHMM` UTC format;
-  later writes preserve both values. `status`: `active`|`finished`. `state`, `reason`: see paradev/loop.md;
+  later writes preserve both values. `status`: `active`|`finished`. Item `state`: `planned` (draft, before
+  the go), `queued`, `in-progress`, `accepting`, `in-review`, `feedback` (a follow-up is being
+  worked), `waiting`, `blocked`, `done`, `skipped`; `reason`: one line on why, for `blocked`,
+  `waiting`, `skipped` and `feedback`. Only scripts move states after the go;
   `cycle.sh` adds the transient state `accepting`
   (a DONE block arrived, `acceptance` `"pending"`; it becomes `in-review` only through `accept.sh`, and does not count against the parallel limit). `plan.sh` adds `owner`,
   `heartbeat`, `takenOverFrom`, `forcedAt`, `carryOver`, and `integrationCarryOver` on close;
@@ -43,10 +46,12 @@
   beyond the `ask`, for the human only (possible follow-ups; never sent to the worker). All three
   `null` for tracker items (the issue body is the user's text). `text`: an older plan's single
   free-text description, still loaded and dispatched; ignored when `ask` is set.
+- `workspace`, `terminal` (item): the Paradev workspace and agent terminal; on Orca the dispatch ID
+  (`ctx_…`) and Orca's terminal handle (`term_…`). `owner`: the coordinator's terminal, the same way.
 - `pr` (item and integration): `null`, or the full PR URL string (`"https://github.com/owner/repo/pull/388"`),
   never a bare number or `"#388"`; the scripts read it as a string and `plan.sh write` rejects anything else.
 - `preset`: `auto`|`regular`. `presets`: per harness, the kinds
-  [preflight](../SKILL.md#planning) found. `autoOnly`: per auto-only
+  [preflight](../SKILL.md#plan) found. `autoOnly`: per auto-only
   harness, the user's `"accepted"`/`"declined"` (absent: not asked yet).
 - `checked`: the worker's `checked:` line. `acceptance`: `null`, `"ok"`, or the
   [gap](../paradev/loop.md#acting-on-needs). `followUp`: `null` or `{"after": "<ID>", "message": "<text>"}`

@@ -6,22 +6,22 @@ Never write jq against the plan: only `plan.sh write` changes it.
 
 | User says | Mode |
 | --- | --- |
-| items, `feature #400`, `feature: <text>`, free text | Run: SKILL.md planning, dispatch, then steps 4-6 |
-| "continue" | Run preflight (`--mode continue`), then steps 4-6 on the saved plan |
+| items, `feature #400`, `feature: <text>`, free text | Run: SKILL.md planning, dispatch, then steps 1-3 |
+| "continue" | Run preflight (`--mode continue`), then steps 1-3 on the saved plan |
 | "report back" / "status" | `preflight.sh --mode report`, then `table.sh`; never starts or messages a worker |
-| "close" | `preflight.sh --mode close`, `plan.sh close`, then step 6 |
+| "close" | `preflight.sh --mode close`, `plan.sh close`, then step 3 |
 
 ## The loop
 
-4. **Watch**: start `<skill-dir>/scripts/watch.sh <project-id> <plan-file>` in the background
+1. **Watch**: start `<skill-dir>/scripts/watch.sh <project-id> <plan-file>` in the background
    (foreground with a short timeout where the harness has no background notifications). It runs
    `cycle.sh` (transitions, merge gate, integrations, dispatch, tags) and exits with new events and
    the `needs` JSON. `cycle.sh` alone for a one-off pass. Starting the watcher and waiting are
    mechanical: do not narrate them in chat.
-5. **Act on each `needs`** (below), then restart `watch.sh`. Exit `finished`: step 6;
+2. **Act on each `needs`** (below), then restart `watch.sh`. Exit `finished`: step 3;
    `taken-over`: stop and report that event. If a wake has no new events requiring judgment or user
    action, restart the watcher silently. A timeout or routine state change is not a chat event.
-6. **Finish**: `finish.sh <project-id> <plan-file>` prints the current plan-derived status table
+3. **Finish**: `finish.sh <project-id> <plan-file>` prints the current plan-derived status table
    and complete chronological events log in chat (including the `finished` event; empty items and
    events are called out explicitly). Then `summary.sh <plan-file>` publishes the run summary page
    without asking; tell the user the URL.

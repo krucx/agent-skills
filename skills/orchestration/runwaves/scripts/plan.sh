@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Own and update the repo's plan file safely: one coordinator per repo's plan at a time. The plan
-# records its owner (the coordinator's Paradev terminal) and a heartbeat; every write is
+# records its owner (the coordinator's Paradev terminal, or its Orca terminal handle) and a heartbeat; every write is
 # owner-checked, locked and swapped in atomically, so a crash never leaves a half-written plan.
 #
 # Usage (inside the repo):
@@ -33,7 +33,10 @@ dir="$HOME/.agents/orchestrator"
 # owner/repo from the origin remote (git@github.com:o/r.git or https://github.com/o/r), offline.
 repo=$(git remote get-url origin | sed -E 's#(\.git)?/?$##; s#^.*[:/]([^/]+/[^/]+)$#\1#')
 plan="$dir/${repo//\//-}.json"
-me=${SUPERSET_TERMINAL_ID:-unknown}
+here=$(cd "$(dirname "$0")" && pwd)
+. "$here/common.sh"
+# The coordinator's terminal: Paradev's ID, else the Orca terminal handle (term_…).
+if [[ $(backend) == orca ]]; then me=$ORCA_TERMINAL_HANDLE; else me=${SUPERSET_TERMINAL_ID:-unknown}; fi
 # superset, paradev and pdev are the same Paradev CLI; use whichever is installed.
 cli=$(command -v superset || command -v paradev || command -v pdev || true)
 now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -48,7 +51,7 @@ lock() {
     mkdir "$plan.lock" 2>/dev/null && { trap 'rmdir "$plan.lock"' EXIT; return; }
     sleep 0.2
   done
-  echo "plan is locked by another writer: $plan.lock (remove it if no orchestrator is running)" >&2
+  echo "plan is locked by another writer: $plan.lock (remove it if no coordinator is running)" >&2
   exit 1
 }
 
@@ -63,6 +66,13 @@ put() {
 owner_alive() {
   local terminal=$1
   [[ "$terminal" != "unknown" ]] || return 1
+  if [[ $terminal == term_* ]]; then  # an Orca owner: live while Orca lists its terminal running an agent
+    local list
+    list=$(orca_cli terminal list --json 2>/dev/null) || { echo "Orca CLI not reachable: cannot tell whether $terminal is live" >&2; exit 1; }
+    jq -e --arg t "$terminal" '[.result.terminals[]? | select(.handle == $t and (.orphaned | not)
+      and .connected != false and .agentIdentity != null)] | length > 0' <<<"$list" >/dev/null
+    return
+  fi
   [[ -n "$cli" ]] || { echo "Paradev CLI not found: install superset, paradev or pdev" >&2; exit 1; }
   "$cli" snapshot --json | jq -e --arg t "$terminal" \
     '[.workspaces[].terminals[] | select(.id == $t and .agent != null)] | length > 0' >/dev/null

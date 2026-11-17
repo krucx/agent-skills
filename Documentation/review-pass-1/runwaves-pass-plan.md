@@ -1,15 +1,39 @@
-# Orchestrator pass: gaps and a token plan (2026-11-14)
+# Runwaves pass: gaps and a token plan (2026-11-14)
 
-Scope: `skills/orchestration/runwaves` at commit 9baa3eb. Plan only; nothing changed.
+Scope: `skills/orchestration/runwaves` (named `orchestrator` until #87). Sections 1-10 are the plan
+written at commit 9baa3eb; sections 11-13 record what was built and measured after it.
+
+## Current status (2026-11-17)
+
+- **Built**: every step of section 9, then the backends (#88, #89) and nested local chain branches
+  (#91). Script tests: 696 passed, 0 failed. SKILL.md is about 1.3K tokens (6.7K before).
+- **Backends**: on an Orca host, `orca` runs every run, large or small, epics and chains
+  included (decided 2026-11-17). It uses the same plan file and scripts as `loop`: `cycle.sh`
+  runs once per Orca wake instead of under `watch.sh`, `dispatch.sh` starts each worker with
+  `orca orchestration worker-start` in its own child worktree, `status.sh` reads Orca's dispatch
+  state and `worker_done` reports, `send.sh` uses `orca orchestration send`, and `plan.sh` owns the
+  run by the Orca terminal handle. On Paradev, `fanout` takes 5 or fewer independent free-text
+  items, `loop` everything else.
+- **Routing**: 18/18 fresh sessions chose the expected skill (section 13), before the Orca change.
+- **Token target** (coordinator under 10% of worker spend): not shown yet. The dry runs (sections
+  11 and 13) used tiny tasks, so the coordinator's fixed cost dominates them. The verdict waits
+  for a run on real issues that need implementing; no run is planned until then.
+- **Open**:
+  - The Orca backend is covered by the shim tests only; no live Orca run has used the plan yet.
+    The Orca dispatch states it maps (`succeeded`, `failed` and the like settle a worker) were
+    read from Orca 1.4.259; others count as working.
+  - A merge a human makes does not wake an Orca coordinator; "runwaves continue" picks it up.
+  - Kept on purpose: `~/.agents/orchestrator/` (saved runs resume from it). Workers now print
+    `RUNWAVES_WORKER_*`; `status.sh` still reads the older `ORCHESTRATOR_WORKER_*`.
 
 ## 1. Baseline, measured from Claude Code transcripts
 
 | Run | Orchestrator turns | Orchestrator output tokens | Orchestrator cache-read tokens | Peak context | Workers (output / cache-read) |
 | --- | --- | --- | --- | --- | --- |
-| 12 issues, 2026-11-13 (Sonnet) | 151 | 114K | 25.6M | 224K | 8 of 12 measured: 129K / 18.3M (≈190K / 27M for all 12) |
+| 12 issues, 2026-11-13 (Sonnet) | 151 | 114K | 20.2M | 191K | 12 workers: 278K / 42.7M |
 | 4-issue epic, 2026-11-14 (Sonnet) | 73 | 26K | 6.2M | 103K | 4 workers: 20K / 2.4M |
 
-Reproduced with `python3 -I skills/orchestration/runwaves/scripts/usage.py` (issue #55). A turn is one assistant transcript line with usage. The 4-issue run matches exactly (73 turns, 26K output, 6.2M cache-read, 103K peak). The 12-issue run's first 151 turns (`--turns 151` on the 2026-11-13 session, the orchestrator portion) give 114K output, 724K cache-write, 20.2M cache-read and a 191K peak at that point (224K later in the session), 37 minutes. The 25.6M cache-read figure above does not reproduce from those 151 turns: the transcript shows 20.2M at turn 151, and 25.6M only appears at about turn 178, so the baseline probably counted a longer window. Use 20.2M as the like-for-like baseline. With all twelve worker transcripts found by branch name (`--run 20261113-1424`), workers total 516 turns, 278K output and 42.7M cache-read, so the orchestrator was 41% of worker output and 47% of worker cache-read (the "8 of 12 measured" worker figures above were partial).
+Reproduced with `python3 -I skills/orchestration/runwaves/scripts/usage.py` (issue #55). A turn is one assistant transcript line with usage. The 4-issue run matches exactly (73 turns, 26K output, 6.2M cache-read, 103K peak). The 12-issue run's first 151 turns (`--turns 151` on the 2026-11-13 session, the orchestrator portion) give 114K output, 724K cache-write, 20.2M cache-read and a 191K peak at that point (224K later in the session), 37 minutes. The row above uses those like-for-like figures. The first recording said 25.6M cache-read and a 224K peak, which do not reproduce from those 151 turns: 25.6M only appears at about turn 178, so it counted a longer window. With all twelve worker transcripts found by branch name (`--run 20261113-1424`), workers total 516 turns, 278K output and 42.7M cache-read, so the orchestrator was 41% of worker output and 47% of worker cache-read (the first recording measured only 8 of the 12 workers: 129K / 18.3M).
 
 So the orchestrator spends about as much as all its workers combined. The bar ("comparable to running the items myself") means the orchestrator should be a small fraction of worker spend, say under 10%.
 
@@ -82,7 +106,7 @@ The worker already holds the issue and the diff. Add to the DONE block: `criteri
 
 ## 5. Expected result
 
-Turns ≈ 2 (preflight, plan) + 1 (go) + judgment events (0.3–0.5 per item) + 1 (finish), each at ≤ 40K context. For the 12-item run: roughly 12–15 turns, about 0.5M cache-read, about 10K output, against 151 / 25.6M / 114K today. Orchestrator at 3–5% of worker spend, and no model-written plan data.
+Turns ≈ 2 (preflight, plan) + 1 (go) + judgment events (0.3–0.5 per item) + 1 (finish), each at ≤ 40K context. For the 12-item run: roughly 12–15 turns, about 0.5M cache-read, about 10K output, against 151 / 20.2M / 114K today. Orchestrator at 3–5% of worker spend, and no model-written plan data.
 
 ## 6. Order of work
 

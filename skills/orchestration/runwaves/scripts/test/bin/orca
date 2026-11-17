@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Test shim for the Orca CLI: answers from JSON fixtures in $FIX instead of a running Orca.
+#   $FIX/orca-terminals.json  terminal list's terminals (default: none)
+#   $FIX/orca-workers/<id>    worker-show's result for dispatch <id>
+#   $FIX/orca-inbox.json      inbox messages (default: none)
+#   $FIX/orca-start-fail      when present, worker-start fails with its text as the error
+#   $FIX/orca-start.args      the arguments of the last worker-start call, one per line;
+#                             $FIX/orca-spec: the spec file it was given
+#   $FIX/orca-send.log        send calls: "<to> <body>"
+# worker-start answers dispatch ctx_new, terminal term_new, workspace $FIX/orca-wt (if it exists).
+set -euo pipefail
+arg() { local want=$1; shift; while (($#)); do [[ $1 == "$want" ]] && { echo "$2"; return; }; shift; done; }
+case "$1 ${2:-}" in
+  "terminal list") jq -nc --argjson t "$(cat "$FIX/orca-terminals.json" 2>/dev/null || echo '[]')" '{ok: true, result: {terminals: $t}}' ;;
+  "orchestration worker-start")
+    printf '%s\n' "$@" >"$FIX/orca-start.args"
+    cp "$(arg --spec-file "$@")" "$FIX/orca-spec"
+    [[ ! -f $FIX/orca-start-fail ]] || { cat "$FIX/orca-start-fail" >&2; exit 1; }
+    mkdir -p "$FIX/orca-workers"
+    jq -nc --arg w "orcaid::$FIX/orca-wt" '{dispatchId: "ctx_new", runId: "run_1", state: "running",
+      terminal: "term_new", workspace: $w}' >"$FIX/orca-workers/ctx_new"
+    echo '{"ok":true,"result":{"dispatchId":"ctx_new","taskId":"task_new"}}' ;;
+  "orchestration worker-show")
+    f="$FIX/orca-workers/$(arg --dispatch "$@")"
+    [[ -f $f ]] || { echo '{"ok":false,"error":"no such dispatch"}'; exit 1; }
+    jq -c '{ok: true, result: .}' "$f" ;;
+  "orchestration inbox") jq -nc --argjson m "$(cat "$FIX/orca-inbox.json" 2>/dev/null || echo '[]')" '{ok: true, result: {messages: $m}}' ;;
+  "orchestration send") echo "$(arg --to "$@") $(arg --body "$@")" >>"$FIX/orca-send.log"; echo '{"ok":true}' ;;
+  *) echo "orca shim: unsupported: $*" >&2; exit 1 ;;
+esac
