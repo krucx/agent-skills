@@ -8,7 +8,7 @@
 #   Run it once per Orca wake and at the go; never in a loop (Orca wakes the coordinator).
 #
 # In order: heartbeat; status.sh once; reconcile; transitions; acceptance hand-off; merge gate;
-# integrations; dispatch; tags re-applied; finished detection. Every action appends a plan event;
+# integrations; the Orca task graph (Orca only); dispatch; tags re-applied; finished detection. Every action appends a plan event;
 # the plan is written through plan.sh write (before the steps that read it from disk, and at the end).
 #
 # Atomicity: until the first plan write the cycle only computes; worker messages are queued and
@@ -456,6 +456,44 @@ P=$(jq -c '. as $p | .integrations = [(.integrations // [])[] | . as $i
     else (if $it.pr != null and $i.pr == null then .pr = $it.pr else . end)
          | (if $it.state == "done" then .state = "merged" else . end) end]' <<<"$P")
 flush
+
+# --- 7b. Orca task graph ----------------------------------------------------------------------
+# On Orca every item is also a Task in one Orca Run, with the plan's dependencies, so Orca shows the
+# graph. A Task carries no worker spec: dispatch.sh starts the item's worker as its child Task. Orca
+# counts a dependency met on its worker's report, before acceptance and the merge gate, so this
+# step decides that instead: it marks the Task completed once the item is done and failed once
+# it is skipped. A failed Orca call is reported and retried next cycle; it never stops the cycle.
+graph() {
+  local run id deps tid want detail
+  run=$(jq -r '.orcaRun // empty' <<<"$P")
+  if [[ -z $run ]]; then
+    run=$(orca_cli orchestration run-create --objective "runwaves $(jq -r '.runId // "run"' <<<"$P")" --json \
+      </dev/null 2>"$scratch/err" | jq -r '[.. | strings | select(startswith("run_"))][0] // empty' 2>/dev/null)
+    [[ -n $run ]] || { echo "cycle: Orca run-create failed: $(head -n 1 "$scratch/err")" >&2; return 0; }
+    P=$(jq -c --arg r "$run" '.orcaRun = $r' <<<"$P"); ev null graph "Orca run $run"
+  fi
+  # A Task once all its in-run dependencies have one (dependency order; a cycle never gets one).
+  while id=$(jq -r '. as $p | [.items[] | select(.orcaTask == null)
+      | select(all((.dependsOn // [])[]; . as $d | [$p.items[] | select(.id == $d)] | length == 0 or .[0].orcaTask != null))][0].id // empty' <<<"$P")
+    [[ -n $id ]]; do
+    deps=$(jq -c --arg id "$id" '. as $p | [(.items[] | select(.id == $id) | .dependsOn // [])[] as $d
+      | $p.items[] | select(.id == $d) | .orcaTask]' <<<"$P")
+    tid=$(orca_cli orchestration task-create --run "$run" --task-title "$id $(field "$id" .title | cut -c1-50)" \
+      --spec "runwaves item $id: its worker starts as a child Task; runwaves marks this Task completed once $id is merged." \
+      --deps "$deps" --json </dev/null 2>"$scratch/err" | jq -r '[.. | strings | select(startswith("task_"))][0] // empty' 2>/dev/null)
+    [[ -n $tid ]] || { echo "cycle: Orca task-create for $id failed: $(head -n 1 "$scratch/err")" >&2; return 0; }
+    upd "$id" '.orcaTask = $t' --arg t "$tid"; ev "$id" graph "Orca task $tid, deps $deps"
+  done
+  while IFS=$'\t' read -r id tid want; do
+    detail=$(field "$id" .pr); [[ $want == completed ]] || detail="skipped: $(field "$id" .reason)"
+    orca_cli orchestration task-update --run "$run" --id "$tid" --status "$want" --result "${detail:-merged}" --json \
+      </dev/null >/dev/null 2>"$scratch/err" || { echo "cycle: Orca task-update for $id failed: $(head -n 1 "$scratch/err")" >&2; continue; }
+    upd "$id" '.orcaStatus = $w' --arg w "$want"; ev "$id" graph "Orca task $want"
+  done < <(jq -r '.items[] | select(.orcaTask != null)
+    | [.id, .orcaTask, (if .state == "done" then "completed" elif .state == "skipped" then "failed" else "" end), (.orcaStatus // "")]
+    | select(.[2] != "" and .[2] != .[3]) | .[0:3] | @tsv' <<<"$P")
+}
+[[ -n $dry || $host != orca ]] || { graph; flush; }
 
 # --- 8. dispatch ------------------------------------------------------------------------------
 squash_only=$(jq -r '(((.repo | objects | .mergeMethods) // .mergeMethods // []) == ["squash"])' <<<"$P")

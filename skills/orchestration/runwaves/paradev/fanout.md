@@ -1,8 +1,7 @@
 # Paradev fanout
 
 Fanout backend only: small runs handed to Paradev's `superset:orchestrate` skill. Read after the
-go. Uses none of this skill's scripts, plan file or groups; a preflight exit other than 1 does not
-stop it.
+go. Uses none of this skill's scripts, plan file, groups or references.
 
 - **Where items run**: 1 or 2 items run as agents in your current workspace (same worktree; panes
   or subagents are fine). 3 or more get one new workspace each, visible in the Paradev sidebar;

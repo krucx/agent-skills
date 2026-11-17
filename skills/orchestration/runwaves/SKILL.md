@@ -14,10 +14,15 @@ You plan; a backend runs. `<skill-dir>` = this folder. "continue", "report back"
 For a new run, open no backend file (`orca.md`, `paradev/fanout.md`, `paradev/loop.md`) until
 the user gives the go: planning needs none of them.
 
+**Fanout** (Paradev, free text only, 5 or fewer tasks, no dependencies, nothing to resume): split the
+tasks as in **Free text** below and show them with each `ask` quoted. Run no script, write no plan file
+and open no reference. On the go, follow [paradev/fanout.md](paradev/fanout.md). A dependency turns up:
+it is a loop run, so plan it in full.
+
 ## Plan
 
-On Paradev, first `<skill-dir>/scripts/preflight.sh`; non-zero exit: read
-[paradev/dispatch.md](paradev/dispatch.md); a fanout run stops only on exit 1. On Orca
+On Paradev (loop), first `<skill-dir>/scripts/preflight.sh`; non-zero exit: read
+[paradev/dispatch.md](paradev/dispatch.md). On Orca
 (`ORCA_WORKSPACE_ID` set) run `<skill-dir>/scripts/plan.sh claim` instead (exit 3 or 4:
 [recovery](references/recovery.md)).
 
@@ -40,7 +45,7 @@ On Paradev, first `<skill-dir>/scripts/preflight.sh`; non-zero exit: read
   `dependsOn` or state and reshow; never edit the table. Squash-only repos: dependents wait for the
   merge. `<plan-file>` before the go is a draft JSON in your scratch folder (`runId`, `items` with
   `id`, `title`, `state` `planned`, `dependsOn`; [schema](references/plan-schema.md)): loop saves it
-  with `plan.sh write`, orca saves it at the go, fanout drops it.
+  with `plan.sh write`, orca saves it at the go.
 
 ## Go message
 

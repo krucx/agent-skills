@@ -38,6 +38,10 @@
   integration can finish; `epic` (optional): `{id, title, url}` of the parent issue an epic run imported; the final PR links it; `integrates`: on the synthetic `<F>-integrate` item `integrate.sh add`
   creates (no `integration`; targets the default branch, starts on integration `<F>`'s branch), or `null`/absent for an item targeting the default branch. An item's
   **target** is its integration's `branch`, else the default branch; one run may mix both.
+- `orcaRun` (Orca only): the Orca Run holding the plan's task graph. Item `orcaTask`: the item's
+  Task in it, created by `cycle.sh` with the item's dependencies as Task deps; the worker's own
+  Task is its child. `orcaStatus`: what `cycle.sh` last set it to (`completed` once the item is
+  `done`, `failed` once `skipped`).
 - `pageId`: the run-summary page, once published; later [reporting](../paradev/loop.md#reporting) (`summary.sh`) pass
   it as `--page` to add a version.
 - `ask`: a free-text task's slice of the user's request, verbatim: the task and its whole scope
@@ -62,7 +66,7 @@
   `action` is one of `dispatched`, `pr-opened`, `in-review`, `merged` (into an integration branch,
   by us), `pr-merged` (by a human), `tag-moved`, `follow-up-sent`, `acceptance-gap`, `blocked`,
   `waiting`, `skipped`, `taken-over`, `finished`, `closed`, and the ones `cycle.sh` adds: `reconciled`,
-  `stalled`, `accepting`, `held`, `queued`, `feedback`, `rules`. Append with `plan.sh event <item>
+  `stalled`, `accepting`, `held`, `queued`, `feedback`, `rules`, and `graph` (the Orca task graph). Append with `plan.sh event <item>
   <action> "<detail>"` (owner-checked, under the lock); read with `plan.sh events [--since <ISO>]`.
   `plan.sh close` appends `closed` and `claim --takeover` appends `taken-over` (previous owner in
   `detail`). `plan.sh write` rejects an entry missing a field or with another action, naming its index.

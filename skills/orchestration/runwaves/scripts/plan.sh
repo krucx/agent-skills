@@ -43,7 +43,7 @@ now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 run_id_from_now=$(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$now" +%Y%m%d-%H%M 2>/dev/null ||
   date -u -d "$now" +%Y%m%d-%H%M)
 # The fixed list of event actions; keep in step with references/plan-schema.md.
-actions='["dispatched","pr-opened","in-review","merged","pr-merged","tag-moved","follow-up-sent","acceptance-gap","blocked","waiting","skipped","taken-over","finished","closed","reconciled","stalled","accepting","held","queued","feedback","rules"]'
+actions='["dispatched","pr-opened","in-review","merged","pr-merged","tag-moved","follow-up-sent","acceptance-gap","blocked","waiting","skipped","taken-over","finished","closed","reconciled","stalled","accepting","held","queued","feedback","rules","graph"]'
 
 lock() {
   mkdir -p "$dir"

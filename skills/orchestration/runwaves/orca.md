@@ -12,6 +12,11 @@ only the scripts change it.
   sidebar, and records the dispatch in the plan. The spec is the task and its end state (a PR
   into the target with passing checks) only; Orca's own preamble covers how the worker reports,
   and its `worker_done` report is what `accept` shows you.
+- **Dependencies live in Orca too**: `cycle.sh` puts every item in one Orca Run as a Task with the
+  plan's dependencies, and starts each worker as that Task's child. Orca's "completed" is not
+  enough on its own: a worker reports before acceptance and the merge gate. So `cycle.sh` marks
+  a Task completed only once its item is done, and failed once it is skipped. Never run
+  `task-create`, `task-update` or `worker-start` yourself.
 - **Go**: `plan.sh write <draft>` (from then on `<plan-file>` is `plan.sh path`), the go
   message's answers (`chains.sh accept|share`, `epic.sh import`, as in
   [integrations](references/integrations.md)), then `cycle.sh - <plan-file>`. End your turn.
