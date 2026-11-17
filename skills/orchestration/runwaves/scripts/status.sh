@@ -30,8 +30,9 @@
 # Screen hashes: ~/.agents/orchestrator/screens/<plan's runId, else project>.json.
 # On Orca (common.sh backend) the rows are the plan's dispatched items only: agent state from
 # `orca orchestration worker-show` (working until the dispatch settles; blocked with no reason while
-# it waits on a human), worker from the block in its latest worker_done message, pr as above; no
-# groups, stalls or screens.
+# it waits on a human), worker from its latest worker_done message: a worker block in it if any,
+# else the report itself (marker done, or blocked when the dispatch failed; the report is `checked`,
+# its subject the summary); pr as above; no groups, stalls or screens.
 # gh and Paradev list calls retry 3 times, RETRY_DELAY (5) seconds apart, doubling.
 set -euo pipefail
 
@@ -135,15 +136,22 @@ if [[ $(backend) == orca ]]; then
         continue
       fi
       run=$(jq -r '.result.runId // empty' <<<"$shown")
-      body=''
+      body='' msg=''
       if [[ -n $run ]]; then
         if [[ $(jq -r --arg r "$run" 'has($r)' <<<"$inboxes") != true ]]; then
           mail=$(orca_cli orchestration inbox --terminal "run:$run" --limit 100 --full --json </dev/null 2>/dev/null || echo '{}')
           inboxes=$(jq -c --arg r "$run" --argjson m "$(jq -c '[.result.messages[]?]' <<<"$mail" 2>/dev/null || echo '[]')" '.[$r] = $m' <<<"$inboxes")
         fi
-        body=$(jq -r --arg r "$run" --arg d "$d" '[.[$r][] | select(.type == "worker_done" and .payload.dispatchId == $d)] | last | .body // empty' <<<"$inboxes")
+        msg=$(jq -c --arg r "$run" --arg d "$d" '[.[$r][] | select(.type == "worker_done" and .payload.dispatchId == $d)] | last // empty' <<<"$inboxes")
+        body=$(jq -r '.body // empty' <<<"${msg:-null}")
       fi
       worker=$(printf '%s\n' "$body" | worker_block)
+      if [[ ( -z $worker || $worker == null ) && -n $body ]]; then  # Orca's own report, no block
+        worker=$(jq -c --argjson s "$shown" --argjson m "$msg" '
+          {marker: (if $s.result.state == "failed" then "blocked" else "done" end), summary: ($m.subject // ""),
+           checked: ($m.body | gsub("\\s+"; " ") | .[0:600])}
+          | if .marker == "blocked" then {marker, reason: .checked} else . end' <<<"null")
+      fi
       jq -c --argjson s "$shown" --argjson worker "${worker:-null}" --argjson prs "$prs" --argjson conflicts "$conflicts" '
         ($s.result) as $r
         | ($r.state // "") as $st

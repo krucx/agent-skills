@@ -1,8 +1,17 @@
 # Worker prompt
 
-Built and sent by `dispatch.sh` (exact wording there). First line: Claude, Hermes `/<skill> <ID>`;
-Codex `$<skill> <ID>`; others, and every worker on Orca (Orca's preamble comes first), `Use the
-<skill> skill to do <ID>.` Then, in order:
+Built and sent by `dispatch.sh` (exact wording there).
+
+**On Orca** the spec is the task and its end state only, since Orca's own preamble covers
+reporting (`worker_done`), questions (`ask`) and escalation: `Use the <skill> skill to do <ID>.`;
+the free-text `ask` and `notes` as below; the other items and "stay within <ID>"; an
+`<F>-integrate` job, a stacked base or a local integration branch in a line or two each; otherwise a
+PR into the target whose checks pass (no checks: `no PR checks; local: <command> passed` in the
+report); "in your report, say what you verified". None of the rest of this page is sent. The
+report itself becomes `checked` (a failed dispatch's report, the block reason).
+
+**On Paradev** (the loop), first line: Claude, Hermes `/<skill> <ID>`; Codex `$<skill> <ID>`;
+others `Use the <skill> skill to do <ID>.` Then, in order:
 
 - free text: the `ask`, labelled as the user's verbatim words and the whole scope, then any
   `notes`, labelled as context adding no work (older plan: `text`, unlabelled); tracker items get
@@ -48,9 +57,8 @@ Codex `$<skill> <ID>`; others, and every worker on Orca (Orca's preamble comes f
   worker can check); DONE reports `criteria: <met>/<total>` after `checked:` and, when met < total, one
   indented `unmet:` line per criterion not met or not verifiable, quoted with why in a few words; no
   checklist: `n/n` over the criteria the worker derived, listed in `checked:`;
-- end the last message with exactly one block, the marker on its own line; on Orca the
-  `worker_done` report carries it verbatim (`status.sh` reads it there, still accepts the older
-  `ORCHESTRATOR_WORKER_*` markers, and ignores
+- end the last message with exactly one block, the marker on its own line (`status.sh` still
+  accepts the older `ORCHESTRATOR_WORKER_*` markers, and ignores
   mid-sentence markers and blocks still holding `<placeholders>`, so the prompt's own templates
   aren't read as reports):
 
