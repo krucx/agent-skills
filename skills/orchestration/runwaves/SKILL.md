@@ -45,7 +45,8 @@ On Paradev (loop), first `<skill-dir>/scripts/preflight.sh`; non-zero exit: read
   `dependsOn` or state and reshow; never edit the table. Squash-only repos: dependents wait for the
   merge. `<plan-file>` before the go is a draft JSON in your scratch folder (`runId`, `items` with
   `id`, `title`, `state` `planned`, `dependsOn`; [schema](references/plan-schema.md)): loop saves it
-  with `plan.sh write`, orca saves it at the go.
+  with `plan.sh write`, orca saves it at the go. The write queues the `planned` items; never
+  rewrite them as `queued` yourself.
 
 ## Go message
 

@@ -81,6 +81,52 @@ jq '.runId = "model-override"' "$plan" >"$root/next.json"
 expect "plan update: runId preserved against override" "$(jq -r .runId "$plan")" "$run_id"
 expect "plan update: startedAt preserved" "$(jq -r .startedAt "$plan")" "$started_at"
 
+# --- the go: planned items become queued, or waiting where dependencies say so ------------------
+sandbox
+jq -n '{repo: "acme/app", status: "active", items: [
+  {id: "#1", state: "planned", dependsOn: []}, {id: "#2", state: "planned", dependsOn: ["#1"]},
+  {id: "#3", state: "planned", dependsOn: ["#90"], reason: "waiting on #90: still open"},
+  {id: "#4", state: "skipped", reason: "out of scope"}, {id: "#5", state: "planned", dependsOn: ["#4"]}]}' >"$root/next.json"
+"$scripts/plan.sh" write "$root/next.json" >/dev/null
+expect "go: planned items are queued" "$(jq -c '[.items[] | select(.state == "queued") | .id]' "$plan")" '["#1","#2"]'
+expect "go: a draft reason means waiting" "$(jq -c '.items[2] | {state, reason}' "$plan")" '{"state":"waiting","reason":"waiting on #90: still open"}'
+expect "go: a skipped dependency means waiting" "$(jq -c '.items[4] | {state, reason}' "$plan")" '{"state":"waiting","reason":"waiting on #4: out of scope"}'
+expect "go: nothing stays planned" "$(jq -c '[.items[] | select(.state == "planned")]' "$plan")" '[]'
+
+# --- takeover: a new plan starts a fresh run; continue resumes the old one ----------------------
+takeover_sandbox() {
+  sandbox
+  plan_with "[$(item '#1' done w1 t1), $(item '#2' in-review w2 t2), $(jq -nc '{id: "#3", state: "done", integration: "F1"}'),
+    $(jq -nc '{id: "F1-integrate", state: "in-review", integrates: "F1"}')]" \
+    '{"owner": "orch-1", "heartbeat": "2026-01-01T00:00:00Z", "startedAt": "2026-11-12T12:00:00Z", "orcaRun": "run_old",
+      "integrations": [{"id": "F1", "branch": "feature/f1", "state": "open"}]}'
+  "$scripts/plan.sh" claim --takeover >/dev/null
+}
+takeover_sandbox
+cp "$plan" "$root/next.json"
+"$scripts/plan.sh" write "$root/next.json" >/dev/null
+expect "takeover continue: keeps the runId" "$(jq -r .runId "$plan")" "20261112-1200"
+expect "takeover continue: keeps the items" "$(jq -c '[.items[].id]' "$plan")" '["#1","#2","#3","F1-integrate"]'
+expect_exit "takeover continue: nothing archived" "$(ls "$HOME/.agents/orchestrator/history" 2>/dev/null | wc -l | tr -d ' ')" 0
+takeover_sandbox
+jq -n '{repo: "acme/app", runId: "20261119-1000", items: [{id: "#9", state: "planned"}]}' >"$root/next.json"
+out=$("$scripts/plan.sh" write "$root/next.json"); code=$?
+expect_exit "takeover new plan: exits 0" $code 0
+expect_not "takeover new plan: its own runId" "$(jq -r .runId "$plan")" "20261112-1200"
+expect_not "takeover new plan: its own startedAt" "$(jq -r .startedAt "$plan")" "2026-11-12T12:00:00Z"
+expect "takeover new plan: only its items, queued" "$(jq -c '[.items[] | {id, state}]' "$plan")" '[{"id":"#9","state":"queued"}]'
+expect "takeover new plan: no old Orca run" "$(jq -c '{orcaRun, takenOverFrom}' "$plan")" '{"orcaRun":null,"takenOverFrom":null}'
+expect "takeover new plan: the event names the old run" "$(jq -r '.events[-1].detail' "$plan")" "taking over run 20261112-1200"
+old="$HOME/.agents/orchestrator/history/acme-app-20261112-1200.json"
+expect "takeover new plan: the old run is archived, finished" "$(jq -r .status "$old")" finished
+expect "takeover new plan: carryOver like a closed run" "$out" '"carryOver":[{"id":"#2","state":"in-review","reason":null},{"id":"F1-integrate","state":"in-review","reason":null}]'
+expect "takeover new plan: integrationCarryOver too" "$(jq -c '[.integrationCarryOver[] | {f: .integration.id, items: [.items[].id]}]' <<<"$out")" '[{"f":"F1","items":["#3"]}]'
+expect "takeover new plan: from the archive" "$out" "\"from\":\"$old\""
+cp "$plan" "$root/next.json"; new_run=$(jq -r .runId "$plan")
+"$scripts/plan.sh" write "$root/next.json" >/dev/null
+expect "takeover new plan: later writes keep it" "$(jq -r .runId "$plan")" "$new_run"
+expect "takeover new plan: one archive" "$(ls "$HOME/.agents/orchestrator/history" | wc -l | tr -d ' ')" 1
+
 # --- existing plan identity survives resume and takeover ---------------------------------------
 sandbox
 plan_with '[]' '{"startedAt":"2026-11-12T20:15:03Z","runId":"20261112-2015","owner":"me"}'
@@ -1891,6 +1937,18 @@ touch "$FIX/orca-task-fail"
 out=$("$scripts/cycle.sh" - "$plan" 2>&1)
 expect "orca graph: a failed task-create is reported" "$out" "Orca task-create for #1 failed"
 expect "orca graph: and retried next cycle (no Task recorded)" "$(jq -c '.items[0].orcaTask' "$plan")" "null"
+orca_off
+
+# The go on Orca: a draft of planned items, written once, then the first cycle.
+dispatch_sandbox; orca_on; rm -f "$plan"
+jq -n '{repo: "acme/app", items: [{id: "#20", title: "Add CSV export", state: "planned", dependsOn: [], skill: "implement", agent: "claude"},
+  {id: "#21", title: "Import", state: "planned", dependsOn: ["#20"], skill: "implement", agent: "claude"}]}' >"$root/draft.json"
+"$scripts/plan.sh" write "$root/draft.json" >/dev/null
+mkdir -p "$FIX/orca-wt"; git -C "$FIX/orca-wt" init -q -b krucx/issue-20-add-csv-export
+"$scripts/cycle.sh" - "$plan" >/dev/null 2>&1
+expect "orca go: the first cycle dispatches the ready item" "$(jq -c '[.items[] | {id, state}]' "$plan")" \
+  '[{"id":"#20","state":"in-progress"},{"id":"#21","state":"queued"}]'
+expect "orca go: exactly one Orca run" "$(grep -c '^run-create' "$FIX/orca-graph.log")" 1
 orca_off
 
 dispatch_sandbox; orca_on; jq '.owner = "term_me" | .items[0].orcaTask = "task_9"' "$plan" >"$plan.tmp" && mv "$plan.tmp" "$plan"
