@@ -30,7 +30,10 @@ only the scripts change it.
   `send.sh`.
 - Merges a human makes don't wake you: "continue" runs `cycle.sh` again, which marks merged items
   done and starts what they unblocked. `stalled` never comes up here; a worker Orca reports gone
-  shows as `blocked`.
+  shows as `blocked`, and so does a `worker_done` with `outcome=failed` (the worker's own reason).
+  When a follow-up reaches a worker that exited, Orca starts a replacement dispatch: `cycle.sh`
+  adopts its report (linked by Orca task, `followUpOf` or the item) and records the new dispatch
+  and terminal with a `reconciled` event.
 - **report back**: `table.sh - <plan-file>`. **continue**: `plan.sh claim`, then a wake.
   **close**: `plan.sh close`, then `finish.sh - <plan-file>`.
 - **Finish** (`finished` in the cycle output): `finish.sh - <plan-file>`. No summary page: it

@@ -1908,6 +1908,83 @@ expect_exit "orca send: exits 0" $code 0
 expect "orca send: goes to the dispatch" "$(cat "$FIX/orca-send.log")" "dispatch:ctx_2 use the staging key"
 orca_off
 
+# --- Orca reports: string payloads, replacement dispatches, failed outcomes ---------------------
+orca_report_sandbox() { # orca_report_sandbox <payload-json>: #1 in-progress on ctx_1 into feature/csv, one worker_done
+  sandbox; orca_on
+  plan_with "[$(item '#1' in-progress ctx_1 term_1)]" \
+    '{"owner": "term_me", "integrations": [{"id": "F1", "branch": "feature/csv", "base": "main", "state": "open"}]}'
+  setplan '.items[0].integration = "F1"'
+  mkdir -p "$FIX/orca-workers"
+  echo '{"dispatchId": "ctx_1", "taskId": "task_w1", "runId": "run_1", "state": "succeeded", "terminal": "term_1"}' >"$FIX/orca-workers/ctx_1"
+  jq -n --argjson p "$1" '[{type: "worker_done", subject: "#1 PR #5 open into feature/csv",
+    body: "Opened PR #5 into feature/csv. no PR checks; local: npm test passed.", payload: $p}]' >"$FIX/orca-inbox.json"
+  echo '[{"headRefName": "b-#1", "number": 5, "url": "https://github.com/acme/app/pull/5", "state": "OPEN", "isDraft": false}]' >"$FIX/prs.json"
+}
+orca_rows() { rows=$("$scripts/status.sh" - "$plan"); }
+
+for payload in '"taskId=task_w1 dispatchId=ctx_1 outcome=succeeded filesModified=src/a.ts,src/b.ts"' \
+    '"{\"taskId\":\"task_w1\",\"dispatchId\":\"ctx_1\",\"outcome\":\"succeeded\",\"filesModified\":[\"src/a.ts\"]}"' \
+    '{"taskId": "task_w1", "dispatchId": "ctx_1", "outcome": "succeeded"}'; do
+  kind=$(jq -r 'if type == "object" then "object" elif startswith("{") then "JSON string" else "key=value" end' <<<"$payload")
+  orca_report_sandbox "$payload"; orca_rows
+  expect "orca report ($kind payload): matched to its dispatch" "$(row '#1' .worker.marker)" '"done"'
+  expect "orca report ($kind payload): the body is checked" "$(row '#1' .worker.checked)" "local: npm test passed"
+done
+
+# A key=value report goes all the way: acceptance sees `checked`, and the gate merges the green sub-PR.
+orca_report_sandbox '"taskId=task_w1 dispatchId=ctx_1 outcome=succeeded"'
+"$scripts/cycle.sh" - "$plan" >/dev/null 2>&1
+expect "orca report: the item is accepting with the worker's checked" "$(jq -c '.items[0] | [.state, .checked]' "$plan")" \
+  '["accepting","Opened PR #5 into feature/csv. no PR checks; local: npm test passed."]'
+issue_body $'## Acceptance criteria\n- [ ] one'; pr_files 1; : >"$FIX/pr.diff"
+expect "orca report: the packet shows checked" "$("$scripts/accept.sh" packet "$plan")" "checked: Opened PR #5 into feature/csv"
+"$scripts/accept.sh" verdict "$plan" '#1' ok >/dev/null 2>&1
+pr_view OPEN feature/csv MERGEABLE '[{"name":"ci","conclusion":"SUCCESS"}]'
+expect "orca report: merge.sh check passes the green sub-PR" "$("$scripts/merge.sh" check "$plan" '#1' 2>&1)" "merge"
+
+# outcome=failed partway: blocked with the worker's own reason, not "idle with no PR".
+orca_report_sandbox '"taskId=task_w1 dispatchId=ctx_1 outcome=failed"'
+echo '[]' >"$FIX/prs.json"
+jq '.[0].subject = "Stopped: usage limit" | .[0].body = "Hit the usage limit after the migration; tests not run."' \
+  "$FIX/orca-inbox.json" >"$FIX/i.tmp" && mv "$FIX/i.tmp" "$FIX/orca-inbox.json"
+orca_rows
+expect "orca report: outcome=failed is a block" "$(row '#1' .worker)" '"marker":"blocked","reason":"Hit the usage limit'
+out=$("$scripts/cycle.sh" - "$plan" 2>&1)
+expect "orca report: the failed item is blocked with its reason" "$(jq -c '.items[0] | [.state, .reason]' "$plan")" \
+  '["blocked","Hit the usage limit after the migration; tests not run."]'
+expect_not "orca report: no finish follow-up" "$(cat "$FIX/orca-send.log" 2>/dev/null)" "Please finish"
+
+# A replacement dispatch (the follow-up reached an exited worker) reports for the same item.
+replacement() { # replacement <payload-json> [worker-show of ctx_r]: ctx_1 exited quietly, ctx_r reports
+  orca_report_sandbox "$1"
+  setplan '.items[0].orcaTask = "task_g1"'
+  echo '[]' >"$FIX/orca-inbox.json"
+  jq -n --argjson p "$1" '[{type: "worker_done", subject: "PR #5 opened", from_handle: "term_r",
+    body: "Opened PR #5 into feature/csv. no PR checks; local: npm test passed.", payload: $p}]' >"$FIX/orca-inbox.json"
+  [[ -z ${2:-} ]] || echo "$2" >"$FIX/orca-workers/ctx_r"
+}
+replacement '"taskId=task_w1 dispatchId=ctx_r outcome=succeeded"'
+orca_rows
+expect "orca replacement: linked by the dispatch's task" "$(row '#1' '[.id, .replaces, .agent.terminal, .worker.marker]')" '["ctx_r","ctx_1","term_r","done"]'
+"$scripts/cycle.sh" - "$plan" >/dev/null 2>&1
+expect "orca replacement: the plan records the new dispatch and terminal" "$(jq -c '.items[0] | [.workspace, .terminal, .state]' "$plan")" \
+  '["ctx_r","term_r","accepting"]'
+expect "orca replacement: a reconciled event" "$(jq -c '[.events[] | select(.action == "reconciled") | .detail]' "$plan")" \
+  "replacement dispatch ctx_r (terminal term_r) adopted for ctx_1"
+expect_not "orca replacement: one event, not a terminal swap too" "$(jq -c '[.events[] | .detail]' "$plan")" "worker replaced"
+replacement '"taskId=task_g1 dispatchId=ctx_r outcome=succeeded"'
+orca_rows; expect "orca replacement: linked by the item's Orca task" "$(row '#1' .id)" '"ctx_r"'
+replacement '"taskId=task_x dispatchId=ctx_r outcome=succeeded"' \
+  '{"dispatchId": "ctx_r", "taskId": "task_x", "runId": "run_1", "followUpOf": "ctx_1", "state": "succeeded", "terminal": "term_r2"}'
+orca_rows; expect "orca replacement: linked by Orca's followUpOf" "$(row '#1' '[.id, .agent.terminal]')" '["ctx_r","term_r2"]'
+replacement '"taskId=task_x dispatchId=ctx_r outcome=succeeded"'
+jq '.[0].subject = "#1 done: PR #5"' "$FIX/orca-inbox.json" >"$FIX/i.tmp" && mv "$FIX/i.tmp" "$FIX/orca-inbox.json"
+orca_rows; expect "orca replacement: linked by the item in its subject" "$(row '#1' .id)" '"ctx_r"'
+replacement '"taskId=task_x dispatchId=ctx_r outcome=succeeded"'
+jq '.[0].subject = "#12 done"' "$FIX/orca-inbox.json" >"$FIX/i.tmp" && mv "$FIX/i.tmp" "$FIX/orca-inbox.json"
+orca_rows; expect "orca replacement: an unlinked report is not adopted" "$(row '#1' '[.id, .worker]')" '["ctx_1",null]'
+orca_off
+
 # zsh too, when installed
 if command -v zsh >/dev/null; then
   dispatch_sandbox
