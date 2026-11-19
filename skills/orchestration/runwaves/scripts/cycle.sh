@@ -161,7 +161,7 @@ ROWS=$(jq -sc . "$scratch/rows") || die "status.sh printed no JSON"
 
 # --- 3. reconcile -----------------------------------------------------------------------------
 reconcile() {
-  local id row state missing prstate prurl rb rt ra g ws found
+  local id row state missing prstate prurl rb rt rw ra g ws found
   while IFS= read -r id; do
     [[ -n $id ]] || continue
     state=$(field "$id" .state)
@@ -206,6 +206,12 @@ reconcile() {
       upd "$id" '.branch = $b' --arg b "$rb"; ev "$id" reconciled "branch renamed to $rb"
     fi
     rt=$(jq -r '.agent.terminal // empty' <<<"$row")
+    # Orca started a replacement dispatch for the item (status.sh adopted its report)
+    rw=$(jq -r 'if .replaces then .id else empty end' <<<"$row")
+    if [[ -n $rw && $rw != "$(field "$id" .workspace)" ]]; then
+      upd "$id" '.workspace = $w | (if $t != "" then .terminal = $t else . end)' --arg w "$rw" --arg t "$rt"
+      ev "$id" reconciled "replacement dispatch $rw (terminal ${rt:-none}) adopted for $(jq -r .replaces <<<"$row")"
+    fi
     if [[ -n $rt && $rt != "$(field "$id" .terminal)" ]]; then
       ra=$(jq -r '.agent.id // empty' <<<"$row")
       upd "$id" '.terminal = $t | (if $a != "" then .agent = $a else . end)' --arg t "$rt" --arg a "$ra"
