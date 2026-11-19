@@ -34,6 +34,10 @@ only the scripts change it.
   When a follow-up reaches a worker that exited, Orca starts a replacement dispatch: `cycle.sh`
   adopts its report (linked by Orca task, `followUpOf` or the item) and records the new dispatch
   and terminal with a `reconciled` event.
+  Each cycle reads every worker's branch from its worktree (a `reconciled` event when it differs
+  from the plan's) and finds the item's PR there; an `<F>-integrate` item's PR is its integration
+  branch into its target. A `blocked` item whose branch gets a new open PR moves to `accepting`,
+  and to `done` once that PR merges: never rewrite the plan for it.
 - **report back**: `table.sh - <plan-file>`. **continue**: `plan.sh claim`, then a wake.
   **close**: `plan.sh close`, then `finish.sh - <plan-file>`.
 - **Finish** (`finished` in the cycle output): `finish.sh - <plan-file>`. No summary page: it

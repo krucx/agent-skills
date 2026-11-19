@@ -2041,6 +2041,73 @@ orca_rows; expect "orca replacement: linked by the item in its subject" "$(row '
 replacement '"taskId=task_x dispatchId=ctx_r outcome=succeeded"'
 jq '.[0].subject = "#12 done"' "$FIX/orca-inbox.json" >"$FIX/i.tmp" && mv "$FIX/i.tmp" "$FIX/orca-inbox.json"
 orca_rows; expect "orca replacement: an unlinked report is not adopted" "$(row '#1' '[.id, .worker]')" '["ctx_1",null]'
+
+# --- Orca: every item finds its PR (#104) ------------------------------------------------------
+# a worktree still on its base at dispatch: the plan keeps the planned branch; the next cycle reads
+# the live one, says so, and finds its PR there
+dispatch_sandbox; orca_on; jq '.owner = "term_me" | .maxParallel = 0' "$plan" >"$plan.tmp" && mv "$plan.tmp" "$plan"
+mkdir -p "$FIX/orca-wt"; git -C "$FIX/orca-wt" init -q -b main
+out=$("$scripts/dispatch.sh" - "$plan" '#20' 2>&1)
+expect "orca pr: a base read at dispatch is not the item's branch" "$(plan_item)" '"branch":"issue-20-add-csv-export-please"'
+git -C "$FIX/orca-wt" checkout -q -b krucx/issue-20-add-csv-export-please
+echo '{"dispatchId": "ctx_new", "runId": "run_1", "state": "succeeded", "terminal": "term_new", "workspace": "orcaid::'"$FIX"'/orca-wt"}' >"$FIX/orca-workers/ctx_new"
+echo '[{"headRefName": "krucx/issue-20-add-csv-export-please", "baseRefName": "main", "number": 30, "url": "https://github.com/acme/app/pull/30", "state": "OPEN", "isDraft": false}]' >"$FIX/prs.json"
+ocyc() { out=$("$scripts/cycle.sh" - "$plan" 2>"$FIX/cycle.err"); rc=$?; }
+oevs() { jq -r '[.events[] | .item + ":" + .action + " " + .detail] | join("; ")' <<<"$out"; }
+ocyc
+expect "orca pr: the live branch is read each cycle" "$(oevs)" "#20:reconciled branch renamed to krucx/issue-20-add-csv-export-please"
+expect "orca pr: its PR is found on the live branch" "$(plan_item)" '"state":"accepting"'
+expect_not "orca pr: no follow-up while the PR exists" "$(oevs)" "follow-up-sent"
+expect_exit "orca pr: nothing sent to the worker" "$([[ -s $FIX/orca-send.log ]] && echo sent || echo none)" none
+# the live branch back on the base is not taken either
+git -C "$FIX/orca-wt" symbolic-ref HEAD refs/heads/main
+expect "orca pr: a live base branch is ignored" "$("$scripts/status.sh" - "$plan" | jq -r 'select(.item == "#20") | .branch')" \
+  "krucx/issue-20-add-csv-export-please"
+orca_off
+
+# the <F>-integrate item's PR is its integration branch -> base, not the worker's own branch
+sandbox; orca_on
+plan_with "[$(jq -nc '{id: "#1", state: "done", integration: "F1", branch: "b-#1", workspace: null, pr: "https://github.com/acme/app/pull/7"}'),
+  $(item 'F1-integrate' in-progress ctx_1 term_1 | jq -c '.integrates = "F1" | .integration = null | .branch = "krucx/f1-integrate-x"')]" \
+  '{"owner": "term_me", "maxParallel": 0, "integrations": [{"id": "F1", "branch": "feature/csv", "base": "main", "state": "open"}]}'
+mkdir -p "$FIX/orca-workers"; echo '{"dispatchId": "ctx_1", "runId": "run_1", "state": "succeeded", "terminal": "term_1"}' >"$FIX/orca-workers/ctx_1"
+echo '[{"headRefName": "feature/csv", "baseRefName": "main", "number": 16, "url": "https://github.com/acme/app/pull/16", "state": "OPEN", "isDraft": false},
+  {"headRefName": "b-#1", "baseRefName": "feature/csv", "number": 7, "url": "https://github.com/acme/app/pull/7", "state": "MERGED", "isDraft": false}]' >"$FIX/prs.json"
+ocyc
+expect "orca pr: the integration PR is matched by its branch and base" "$(pf '{state, pr}' F1-integrate)" \
+  '"state": "accepting"'
+expect "orca pr: and recorded" "$(pf .pr F1-integrate)" "https://github.com/acme/app/pull/16"
+expect "orca pr: the integration carries it" "$(jq -r '.integrations[0].pr' "$plan")" "https://github.com/acme/app/pull/16"
+expect_not "orca pr: no follow-up for the integrate item" "$(oevs)" "follow-up-sent"
+# a feature PR into another base is not it
+jq '.items[1].state = "in-progress" | .items[1].pr = null | .integrations[0].pr = null' "$plan" >"$plan.tmp" && mv "$plan.tmp" "$plan"
+jq '.[0].baseRefName = "release"' "$FIX/prs.json" >"$FIX/p.tmp" && mv "$FIX/p.tmp" "$FIX/prs.json"
+expect "orca pr: a PR into another base is not the integration PR" \
+  "$("$scripts/status.sh" - "$plan" | jq -c 'select(.item == "F1-integrate") | .pr')" "null"
+orca_off
+
+# blocked, then a PR opens on its branch: accepting; then it merges: done, and its Orca Task completes
+sandbox; orca_on
+plan_with "[$(item '#1' blocked ctx_1 term_1 'no PR after the follow-up' | jq -c '.orcaTask = "task_1" | .pr = null')]" \
+  '{"owner": "term_me", "maxParallel": 0, "orcaRun": "run_g"}'
+mkdir -p "$FIX/orca-workers"; echo '{"dispatchId": "ctx_1", "runId": "run_1", "state": "succeeded", "terminal": "term_1"}' >"$FIX/orca-workers/ctx_1"
+ocyc
+expect "orca pr: blocked with no PR stays blocked" "$(pf .state)" "blocked"
+echo '[{"headRefName": "b-#1", "baseRefName": "main", "number": 15, "url": "https://github.com/acme/app/pull/15", "state": "OPEN", "isDraft": false}]' >"$FIX/prs.json"
+ocyc
+expect "orca pr: blocked -> accepting when its branch gets an open PR" "$(pf '.state + " " + .pr')" "accepting https://github.com/acme/app/pull/15"
+expect "orca pr: the move needs acceptance" "$out" '"kind":"accept","item":"#1"'
+jq '.items[0].state = "blocked" | .items[0].reason = "replaced worker"' "$plan" >"$plan.tmp" && mv "$plan.tmp" "$plan"
+ocyc
+expect "orca pr: blocked with the PR it already had stays blocked" "$(pf .state)" "blocked"
+jq '.[0].state = "MERGED"' "$FIX/prs.json" >"$FIX/p.tmp" && mv "$FIX/p.tmp" "$FIX/prs.json"
+ocyc
+expect "orca pr: blocked -> done when its PR merges" "$(pf .state)" "done"
+expect "orca pr: its Orca Task completes" "$(cat "$FIX/orca-graph.log")" "task-update task_1 completed https://github.com/acme/app/pull/15"
+# a gone dispatch too: its branch's merged PR still finishes it
+plan_with "[$(item '#1' blocked ctx_gone '' 'workspace missing')]" '{"owner": "term_me", "maxParallel": 0}'
+ocyc
+expect "orca pr: blocked with its dispatch gone -> done when its PR merges" "$(pf .state)" "done"
 orca_off
 
 # zsh too, when installed

@@ -23,7 +23,9 @@
 #                     replaces it; still latest after WAIT_MINUTES (30) it adds "stale": true and
 #                     "staleMinutes", so the coordinator checks the screen instead of skipping
 #   pr                newest PR for the branch {number,url,state,isDraft}, or null; an open PR
-#                     GitHub calls CONFLICTING adds "conflicting": true and "base" (its base branch)
+#                     GitHub calls CONFLICTING adds "conflicting": true and "base" (its base branch).
+#                     An <F>-integrate item's PR is its integration branch -> the item's target,
+#                     whatever the worker's own branch is.
 #
 # --compact: one short line per workspace, for watch cycles, adding "branch <b>" or "terminal <t>"
 # only when they differ from the plan's.
@@ -36,6 +38,9 @@
 # an object, a JSON string or "key=value" pairs. A later report from a dispatch the plan doesn't list
 # (Orca's replacement for an exited worker), linked by Orca task, followUpOf or the item, is the
 # row's: id is then that dispatch, "replaces" the plan's, and the terminal its own.
+# The branch is read from the worker's worktree each time (the plan's when it can't be read or is
+# the default, an integration or another item's branch); pr is found on it, else on the plan's
+# branch, for a missing dispatch too.
 # gh and Paradev list calls retry 3 times, RETRY_DELAY (5) seconds apart, doubling.
 set -euo pipefail
 
@@ -123,10 +128,30 @@ emit() { # print $out, one row per line (compact or full)
 }
 
 . "$here/common.sh"
+
+# The item's PR: an <F>-integrate item's is $heads[item] (integration branch -> target); any other's
+# the newest on the first of $branches that has one.
+PR_OF='def pr_of($item; $branches; $heads; $prs; $conflicts):
+  ($heads[$item // ""]) as $h
+  | (if $h then [$prs[] | select(.headRefName == $h.head and .baseRefName == $h.base)][0]
+     else [$branches[] as $b | $prs[] | select(.headRefName == $b)][0] end)
+  | if . == null then null else
+      {number, url, state, isDraft} as $pr
+      | ([$conflicts[] | select(.number == $pr.number)][0]) as $c
+      | if $c then $pr + {conflicting: true, base: $c.base} else $pr end end;'
+heads='{}'
+[[ -n "$plan" && -f "$plan" ]] && heads=$(plan_jq '. as $p | [.items[] | select(.integrates != null) | . as $it
+  | {key: .id, value: {head: ([$p.integrations[]? | select(.id == $it.integrates) | .branch][0]),
+                       base: target($p.integrations; $base)}}] | from_entries' "$plan" -c --arg base "$(default_branch)")
+
 if [[ $(backend) == orca ]]; then
-  prs=$(retry gh pr list --state all --limit 300 --json headRefName,number,url,state,isDraft)
+  prs=$(retry gh pr list --state all --limit 300 --json headRefName,baseRefName,number,url,state,isDraft)
   conflicts=$(retry gh pr list --state open --limit 300 --json number,baseRefName,mergeable |
     jq -c '[.[] | select(.mergeable == "CONFLICTING") | {number, base: .baseRefName}]')
+  # Never an item's own branch: the default branch, an integration branch, another item's branch.
+  # (A worktree read straight after worker-start can still be on its base.)
+  shared=$([[ -n "$plan" && -f "$plan" ]] && jq -c --arg d "$(default_branch)" \
+    '{d: $d, i: [.integrations[]?.branch], items: [.items[] | select(.branch != null) | {id, branch}]}' "$plan" || echo null)
   inboxes='{}'
   show() { orca_cli orchestration worker-show --dispatch "$1" --json </dev/null 2>/dev/null; }
   # A message's payload as an object: Orca's full inbox view sends it as a JSON string, some builds
@@ -143,8 +168,10 @@ if [[ $(backend) == orca ]]; then
     while IFS= read -r p; do
       d=$(jq -r .id <<<"$p") item=$(jq -r .item <<<"$p")
       if ! shown=$(show "$d") || ! jq -e '.result.dispatchId' <<<"$shown" >/dev/null 2>&1; then
-        jq -c '{id, name: null, branch, group: null, missing: true, item, inPlan: true,
-          agent: {terminal, id: null, state: "none", reason: null}, worker: null, pr: null}' <<<"$p"
+        jq -c --argjson prs "$prs" --argjson conflicts "$conflicts" --argjson heads "$heads" "$PR_OF"'
+          {id, name: null, branch, group: null, missing: true, item, inPlan: true,
+           agent: {terminal, id: null, state: "none", reason: null}, worker: null,
+           pr: pr_of(.item; [.branch // empty]; $heads; $prs; $conflicts)}' <<<"$p"
         continue
       fi
       run=$(jq -r '.result.runId // empty' <<<"$shown")
@@ -193,6 +220,14 @@ if [[ $(backend) == orca ]]; then
         shown=$rshown
         p=$(jq -c --arg d "$replaced" '.replaces = .id | .id = $d' <<<"$p")
       fi
+      # The (replacement's) worktree's branch now (Orca may prefix it, a worker may switch it), else the plan's.
+      wpath=$(jq -r '.result.workspace // "" | sub("^[^:]*::"; "")' <<<"$shown")
+      live=''
+      [[ -z $wpath || ! -d $wpath ]] || live=$(git -C "$wpath" branch --show-current 2>/dev/null || true)
+      if [[ -n $live ]] && jq -e --arg b "$live" --argjson p "$p" \
+          '$b == .d or (.i | index($b)) or any(.items[]; .branch == $b and .id != $p.item)' <<<"$shared" >/dev/null; then
+        live=''
+      fi
       worker=$(printf '%s\n' "$body" | worker_block)
       failed=$(jq -r --argjson s "$shown" '$s.result.state == "failed" or .payload.outcome == "failed"' <<<"${msg:-null}")
       if [[ ( -z $worker || $worker == null ) && -n $body ]]; then  # Orca's own report, no block
@@ -203,23 +238,18 @@ if [[ $(backend) == orca ]]; then
       elif [[ ( -z $worker || $worker == null ) && $failed == true && -n $msg ]]; then  # failed, no body
         worker=$(jq -c '{marker: "blocked", reason: (.subject // "worker reported failed")}' <<<"$msg")
       fi
-      jq -c --argjson s "$shown" --argjson worker "${worker:-null}" --argjson prs "$prs" --argjson conflicts "$conflicts" '
+      jq -c --argjson s "$shown" --argjson worker "${worker:-null}" --argjson prs "$prs" --argjson conflicts "$conflicts" \
+        --argjson heads "$heads" --arg live "$live" "$PR_OF"'
         ($s.result) as $r
         | ($r.state // "") as $st
-        | {id, name: null, branch, group: null, missing: false, item, inPlan: true}
+        | {id, name: null, branch: (if $live != "" then $live else .branch end), group: null, missing: false, item, inPlan: true}
         + (if .replaces then {replaces} else {} end)
         + {agent: {terminal: ($r.terminal // .terminal), id: null, reason: null,
                    state: (if $r.waitingOnHuman == true then "blocked"
                            elif ($st | test("^(succeeded|failed|completed|cancell?ed|stopped|exited|lost|abandoned)$")) then "idle"
                            else "working" end)},
            worker: $worker,
-           pr: null}
-        | . as $row
-        | .pr = ([$prs[] | select(.headRefName == $row.branch)][0]
-                 | if . == null then null else
-                     {number, url, state, isDraft} as $pr
-                     | ([$conflicts[] | select(.number == $pr.number)][0]) as $c
-                     | if $c then $pr + {conflicting: true, base: $c.base} else $pr end end)' <<<"$p"
+           pr: pr_of(.item; [$live, .branch] | map(select(. != null and . != "")); $heads; $prs; $conflicts)}' <<<"$p"
     done)
   emit
   exit 0
@@ -231,7 +261,7 @@ cli=$(command -v superset || command -v paradev || command -v pdev) ||
 
 groups=$("$here/groups.sh" "$project" plan "$plan") || (($? == 2))
 snapshot=$(retry "$cli" snapshot --json)
-prs=$(retry gh pr list --state all --limit 300 --json headRefName,number,url,state,isDraft)
+prs=$(retry gh pr list --state all --limit 300 --json headRefName,baseRefName,number,url,state,isDraft)
 # Only the open PRs GitHub calls CONFLICTING, with their bases (a stacked PR whose parent
 # squash-merged), in one call rather than a view per PR.
 conflicts=$(retry gh pr list --state open --limit 300 --json number,baseRefName,mergeable |
@@ -266,7 +296,7 @@ extra=$(jq -c '.[]' <<<"$untagged" | while IFS= read -r p; do
 done | jq -sc '.')
 
 rows=$(jq -c --argjson tagged "$tagged" --argjson extra "$extra" --argjson planned "$planned" \
-  --argjson snapshot "$snapshot" --argjson prs "$prs" --argjson conflicts "$conflicts" -n '
+  --argjson snapshot "$snapshot" --argjson prs "$prs" --argjson conflicts "$conflicts" --argjson heads "$heads" -n "$PR_OF"'
   ($tagged | map(. + {missing: false})) + $extra
   | .[]
   | . as $ws
@@ -279,11 +309,7 @@ rows=$(jq -c --argjson tagged "$tagged" --argjson extra "$extra" --argjson plann
               | if . == null then {terminal: null, id: null, state: "none", reason: null}
                 else {terminal: .id, id: .agent.id, state: .agent.state, reason: null} end),
       worker: null,
-      pr: ([$prs[] | select(.headRefName == $ws.branch)][0]
-           | if . == null then null else
-               {number, url, state, isDraft} as $pr
-               | ([$conflicts[] | select(.number == $pr.number)][0]) as $c
-               | if $c then $pr + {conflicting: true, base: $c.base} else $pr end end),
+      pr: pr_of($p.item; [$ws.branch // empty]; $heads; $prs; $conflicts),
       planBranch: $p.branch,
       planTerminal: $p.terminal
     }')
