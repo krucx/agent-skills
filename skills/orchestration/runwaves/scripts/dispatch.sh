@@ -159,8 +159,8 @@ if [[ $host != orca ]]; then
   tag=${tag:-In Progress}
 fi
 
-# On Orca the spec follows Orca's own preamble, so a slash command would not be its first line.
-[[ $host != orca ]] || agent_line=plain
+# Every backend leads with the skill (Orca puts its preamble above the spec; the worker still
+# starts the task with it).
 case ${agent_line:-$agent} in
   claude|hermes|agy|antigravity) first="/$skill $id" ;;
   codex) first="\$$skill $id" ;;

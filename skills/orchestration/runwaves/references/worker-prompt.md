@@ -3,14 +3,14 @@
 Built and sent by `dispatch.sh` (exact wording there).
 
 **On Orca** the spec is the task and its end state only, since Orca's own preamble covers
-reporting (`worker_done`), questions (`ask`) and escalation: `Use the <skill> skill to do <ID>.`;
+reporting (`worker_done`), questions (`ask`) and escalation: the skill line as on Paradev below;
 the free-text `ask` and `notes` as below; the other items and "stay within <ID>"; an
 `<F>-integrate` job, a stacked base or a local integration branch in a line or two each; otherwise a
 PR into the target whose checks pass (no checks: `no PR checks; local: <command> passed` in the
 report); "in your report, say what you verified". None of the rest of this page is sent. The
 report itself becomes `checked` (a failed dispatch's report, the block reason).
 
-**On Paradev** (the loop), first line: Claude, Hermes `/<skill> <ID>`; Codex `$<skill> <ID>`;
+**On Paradev** (the loop), first line (on every backend, the skill always leads): Claude, Hermes `/<skill> <ID>`; Codex `$<skill> <ID>`;
 others `Use the <skill> skill to do <ID>.` Then, in order:
 
 - free text: the `ask`, labelled as the user's verbatim words and the whole scope, then any

@@ -1816,7 +1816,7 @@ expect "orca dispatch: a new child worktree" "$args" $'--worktree\nnew-child'
 expect "orca dispatch: named after the branch" "$args" $'--name\nissue-20-add-csv-export-please'
 expect "orca dispatch: from the target" "$args" $'--base-branch\nmain'
 spec=$(cat "$FIX/orca-spec")
-expect "orca dispatch: spec names the skill in plain text" "$spec" "Use the implement skill to do #20."
+expect "orca dispatch: spec starts with the skill" "$(head -n 1 "$FIX/orca-spec")" "/implement #20"
 expect "orca dispatch: spec asks for a PR into the target" "$spec" "Finish with a PR into main"
 expect "orca dispatch: spec stays within the item" "$spec" "Other agents are changing this repo in parallel (#21): stay within #20."
 for proto in WORKER_DONE WORKER_BLOCKED WORKER_WAITING "gh pr checks" "Docker Compose" "criteria:"; do
