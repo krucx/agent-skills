@@ -28,7 +28,9 @@
 # Follow-ups reach the worker through send.sh --deliver (the plan write records them first).
 #
 # An item whose DONE block arrived (or that is idle with a PR) moves to the state `accepting`,
-# outside the parallel limit, and becomes `in-review` only through accept.sh. Tests: test/run.sh.
+# outside the parallel limit, and becomes `in-review` only through accept.sh. A blocked item whose
+# PR merged becomes done; one that got a new open PR, accepting (not one the user tagged Blocked).
+# Tests: test/run.sh.
 set -uo pipefail
 
 dry=''
@@ -184,7 +186,7 @@ reconcile() {
     missing=$(jq -r '.missing // false' <<<"$row")
     prstate=$(jq -r '.pr.state // empty' <<<"$row")
     if [[ $missing == true ]]; then
-      started "$state" || continue
+      started "$state" || continue  # a blocked item's PR: unblock, in the transitions
       case $prstate in
         MERGED) upd "$id" '.state = "done" | .reason = null'; ev "$id" pr-merged "workspace gone; PR merged" ;;
         CLOSED) upd "$id" '.state = "blocked" | .reason = "PR closed unmerged"'
@@ -254,12 +256,30 @@ to_accepting() { # to_accepting <id> <why>: the DONE block (or an idle worker wi
   once "$id" accepting "$2" || true
 }
 
+unblock() { # unblock <id> <row>: a blocked item's PR merged (done), or a new one opened (accepting)
+  local id=$1 row=$2 prstate prurl prnum
+  [[ $(jq -r '.group // empty' <<<"$row") != Blocked ]] || return 0  # the user put it there
+  prstate=$(jq -r '.pr.state // empty' <<<"$row"); prurl=$(jq -r '.pr.url // empty' <<<"$row")
+  prnum=$(jq -r '.pr.number // empty' <<<"$row")
+  case $prstate in
+    MERGED) upd "$id" '.state = "done" | .reason = null | .pr = $u' --arg u "$prurl"
+            ev "$id" pr-merged "PR #$prnum merged (was blocked)" ;;
+    OPEN)
+      # The PR it was blocked with (a red check it reported, say) stays blocked; a new one moves on.
+      [[ $prurl != "$(field "$id" .pr)" ]] || return 0
+      upd "$id" '.pr = $u' --arg u "$prurl"; ev "$id" pr-opened "PR #$prnum $prurl (was blocked)"
+      to_accepting "$id" "PR #$prnum opened after the item was blocked"
+      need accept "$id" "PR #$prnum opened after the item was blocked; checked: $(rowfield "$id" .worker.checked)" ;;
+  esac
+}
+
 transition() {
   local id=$1 state row ast areason marker stale prstate prurl prnum it_pr reason
   state=$(field "$id" .state)
-  started "$state" || return 0
   row=$(jq -c --arg id "$id" '[.[] | select(.item == $id)][0] // empty' <<<"$ROWS")
   [[ -n $row ]] || return 0
+  if [[ $state == blocked ]]; then unblock "$id" "$row"; return 0; fi
+  started "$state" || return 0
   [[ $(jq -r '.missing // false' <<<"$row") != true ]] || return 0
   ast=$(jq -r '.agent.state // "none"' <<<"$row"); areason=$(jq -r '.agent.reason // empty' <<<"$row")
   marker=$(jq -r '.worker.marker // empty' <<<"$row"); stale=$(jq -r '.worker.stale // false' <<<"$row")

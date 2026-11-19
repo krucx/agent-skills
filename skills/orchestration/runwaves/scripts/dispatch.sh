@@ -311,6 +311,10 @@ if [[ $host == orca ]]; then
   wpath=$(jq -r '.result.workspace // "" | sub("^[^:]*::"; "")' <<<"$shown")
   got=''
   [[ -z $wpath || ! -d $wpath ]] || got=$(git -C "$wpath" branch --show-current 2>/dev/null || true)
+  # Read this early, the worktree may still be on its base: never record a base or target as the
+  # item's branch (status.sh reads the live branch again each cycle).
+  if [[ $got == "$base" || $got == "$target" || $got == "$default_base" ]] ||
+    jq -e --arg b "$got" 'any(.integrations[]?; .branch == $b)' "$plan" >/dev/null; then got=''; fi
   edit '.workspace = $ws | .terminal = (if $t == "" then null else $t end) | .branch = (if $b == "" then .branch else $b end)' \
     --arg ws "$ws" --arg t "$term" --arg b "$got" >/dev/null 2>"$tmp/err" ||
     fail record "dispatch $ws was started but not recorded: $(cat "$tmp/err")"

@@ -29,7 +29,11 @@ only the scripts change it.
   orchestration reply --id <message_id> --body "<answer>"`. Other messages to a worker:
   `send.sh`.
 - Merges a human makes don't wake you: "continue" runs `cycle.sh` again, which marks merged items
-  done and starts what they unblocked. `stalled` never comes up here; a worker Orca reports gone
+  done and starts what they unblocked. Each cycle reads every worker's branch from its worktree
+  (a `reconciled` event when it differs from the plan's) and finds the item's PR there; an
+  `<F>-integrate` item's PR is its integration branch into its target. A `blocked` item whose
+  branch gets a new open PR moves to `accepting`, and to `done` once that PR merges: never
+  rewrite the plan for it. `stalled` never comes up here; a worker Orca reports gone
   shows as `blocked`.
 - **report back**: `table.sh - <plan-file>`. **continue**: `plan.sh claim`, then a wake.
   **close**: `plan.sh close`, then `finish.sh - <plan-file>`.
