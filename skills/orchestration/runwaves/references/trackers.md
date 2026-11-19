@@ -1,15 +1,12 @@
 # Trackers beyond GitHub
 
-Load when an item or epic parent is a Linear or Jira key (`ENG-123`, `PROJ-7`). GitHub issues stay
-inline in SKILL.md (`gh`).
+Load for a Linear or Jira key (`ENG-123`, `PROJ-7`) as item or epic parent. GitHub stays in SKILL.md.
 
-- **Reach**: `superset tasks get <KEY> --tracker linear --json`, or the harness's own tools. Not
-  reachable: stop and say how to connect (Linear in Paradev, or `superset plugins install
-  linear`). Never install or connect anything yourself.
-- **Fetch**: title, body, labels, author, as for any item; the same drop rules apply.
-- **Parents** (`feature ENG-40`): read the children with `superset tasks get <KEY> --tracker linear
-  --json`; none reachable: say how to connect, stop. `epic.sh` is GitHub sub-issues only, so put the
-  integration (`epic` set to `{id, title, url}`) and the children as its items into the draft plan
-  before the go, with dependencies among them as for any items; `plan.sh write` saves it at the go.
-  After the go, only scripts change `integrations`.
-- Still drop items with an open PR, and name each drop and why.
+- **Reach**: `superset tasks get <KEY> --tracker linear --json`, or the harness's own tools.
+  Unreachable: stop, say how to connect (Linear in Paradev, or `superset plugins install linear`).
+  Never install or connect anything yourself.
+- **Fetch** title, body, labels, author; same drop rules (incl. an open PR), naming each and why.
+- **Parents** (`feature ENG-40`): children via the same `tasks get`; none reachable: say how to
+  connect, stop. `epic.sh` is GitHub-only, so put the integration (`epic` = `{id, title, url}`) and
+  children as its items, with dependencies, into the draft before the go; `plan.sh write` saves it.
+  After the go only scripts change `integrations`.
