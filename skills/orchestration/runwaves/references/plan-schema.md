@@ -14,8 +14,10 @@
 ```
 
 - `runId` is derived by `plan.sh write` from `startedAt` at creation, in `YYYYMMDD-HHMM` UTC format;
-  later writes preserve both values. `status`: `active`|`finished`. Item `state`: `planned` (draft, before
-  the go), `queued`, `in-progress`, `accepting`, `in-review`, `feedback` (a follow-up is being
+  later writes preserve both values, except the first write of a new plan after a takeover (one
+  without the taken-over run's `runId`), which starts a fresh run. `status`: `active`|`finished`. Item `state`: `planned` (draft, before
+  the go; `plan.sh write` makes it `queued`, or `waiting` when the draft gives a `reason` or a
+  dependency is `blocked` or `skipped`), `queued`, `in-progress`, `accepting`, `in-review`, `feedback` (a follow-up is being
   worked), `waiting`, `blocked`, `done`, `skipped`; `reason`: one line on why, for `blocked`,
   `waiting`, `skipped` and `feedback`. Only scripts move states after the go;
   `cycle.sh` adds the transient state `accepting`
