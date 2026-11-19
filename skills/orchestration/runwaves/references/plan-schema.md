@@ -13,64 +13,56 @@
  "events": [{"at": "2026-11-12T20:15:03Z", "item": "#340", "action": "dispatched", "detail": "workspace w340, claude auto"}]}
 ```
 
-- `runId` is derived by `plan.sh write` from `startedAt` at creation, in `YYYYMMDD-HHMM` UTC format;
-  later writes preserve both values. `status`: `active`|`finished`. Item `state`: `planned` (draft, before
-  the go), `queued`, `in-progress`, `accepting`, `in-review`, `feedback` (a follow-up is being
-  worked), `waiting`, `blocked`, `done`, `skipped`; `reason`: one line on why, for `blocked`,
-  `waiting`, `skipped` and `feedback`. Only scripts move states after the go;
-  `cycle.sh` adds the transient state `accepting`
-  (a DONE block arrived, `acceptance` `"pending"`; it becomes `in-review` only through `accept.sh`, and does not count against the parallel limit). `plan.sh` adds `owner`,
-  `heartbeat`, `takenOverFrom`, `forcedAt`, `carryOver`, and `integrationCarryOver` on close;
-  `dispatch.sh` adds `dispatchFailures`
-  after a failed workspace creation.
-- `integrations` (optional; older plans lack it): feature branches that collect a run's PRs.
-  `branch`: `feature/<slug>` (`chain/<id>-<slug>` for a local chain branch); `base`: the repo's default
-  branch (integrations never nest), except a local chain branch's: its `parent`'s branch;
-  `pr`: the PR that lands it on `base`, once opened; `state`: `open`|`merged`; `mergeNote`
-  (optional): `"human"` when its rulesets forbid merge commits (the coordinator then leaves the
-  sub-PR merges to humans), `"strict"` once the up-to-date requirement was reported, `"ok"` when `cycle.sh` read its rules and found none in the way, `"local"` for a local branch (no rules read).
-  `local` (optional): `true` when the branch lives in this clone only until its final PR: no sub-PRs, no CI per item, `merge.sh` merges accepted worker branches locally ([integrations](integrations.md), "Local integration branch").
-  `parent` (optional, with `local: true`): a local chain branch's GitHub integration (`chains.sh accept` on a
-  local chain offer; [integrations](integrations.md), "Local chain branch"). Its `<F>-integrate` item has
-  `integration` the parent, so the chain lands as one sub-PR the merge gate merges; a dependency on a chain
-  item is met outside the chain only once the chain's `state` is `merged`. Item `integration`:
-  an integration's `id`, `dropped` (optional, with state `skipped`): the user dropped it so its
-  integration can finish; `epic` (optional): `{id, title, url}` of the parent issue an epic run imported; the final PR links it; `integrates`: on the synthetic `<F>-integrate` item `integrate.sh add`
-  creates (no `integration`; targets the default branch, starts on integration `<F>`'s branch), or `null`/absent for an item targeting the default branch. An item's
-  **target** is its integration's `branch`, else the default branch; one run may mix both.
-- `orcaRun` (Orca only): the Orca Run holding the plan's task graph. Item `orcaTask`: the item's
-  Task in it, created by `cycle.sh` with the item's dependencies as Task deps; the worker's own
-  Task is its child. `orcaStatus`: what `cycle.sh` last set it to (`completed` once the item is
-  `done`, `failed` once `skipped`).
-- `pageId`: the run-summary page, once published; later [reporting](../paradev/loop.md#reporting) (`summary.sh`) pass
-  it as `--page` to add a version.
-- `ask`: a free-text task's slice of the user's request, verbatim: the task and its whole scope
-  (the [acceptance check](../paradev/loop.md#acting-on-needs) grades against it alone). `notes`: the
-  coordinator's build notes (context, out of scope), adding no work. `extras`: what it would add
-  beyond the `ask`, for the human only (possible follow-ups; never sent to the worker). All three
-  `null` for tracker items (the issue body is the user's text). `text`: an older plan's single
-  free-text description, still loaded and dispatched; ignored when `ask` is set.
-- `workspace`, `terminal` (item): the Paradev workspace and agent terminal; on Orca the dispatch ID
-  (`ctx_…`) and Orca's terminal handle (`term_…`). `owner`: the coordinator's terminal, the same way.
-- `pr` (item and integration): `null`, or the full PR URL string (`"https://github.com/owner/repo/pull/388"`),
-  never a bare number or `"#388"`; the scripts read it as a string and `plan.sh write` rejects anything else.
-- `preset`: `auto`|`regular`. `presets`: per harness, the kinds
-  [preflight](../SKILL.md#plan) found. `autoOnly`: per auto-only
-  harness, the user's `"accepted"`/`"declined"` (absent: not asked yet).
-- `checked`: the worker's `checked:` line. `acceptance`: `null`, `"ok"`, or the
-  [gap](../paradev/loop.md#acting-on-needs). `followUp`: `null` or `{"after": "<ID>", "message": "<text>"}`
-  (sent after a merge by `cycle.sh`; see [the loop](../paradev/loop.md#the-loop)).
-- `events` (top level, optional; older plans lack it): append-only log of what the coordinator and
-  its scripts did, so scripts can act without a model turn and nothing happens silently. Entry:
-  `{"at": "<ISO-8601 UTC>", "item": "<ID or F1 or null>", "action": "<kind>", "detail": "<one line>"}`.
-  `action` is one of `dispatched`, `pr-opened`, `in-review`, `merged` (into an integration branch,
-  by us), `pr-merged` (by a human), `tag-moved`, `follow-up-sent`, `acceptance-gap`, `blocked`,
-  `waiting`, `skipped`, `taken-over`, `finished`, `closed`, and the ones `cycle.sh` adds: `reconciled`,
-  `stalled`, `accepting`, `held`, `queued`, `feedback`, `rules`, and `graph` (the Orca task graph). Append with `plan.sh event <item>
-  <action> "<detail>"` (owner-checked, under the lock); read with `plan.sh events [--since <ISO>]`.
-  `plan.sh close` appends `closed` and `claim --takeover` appends `taken-over` (previous owner in
-  `detail`). `plan.sh write` rejects an entry missing a field or with another action, naming its index.
-- `criteria` (item, optional): what the worker reported about the task's acceptance criteria in its
-  DONE block: `{"met": <n>, "total": <n>, "unmet": ["<criterion>", …]}`, or `null` when it gave none.
-  Written by the coordinator (later `cycle.sh`) from `status.sh`'s worker block. `plan.sh write`
-  rejects non-integer `met`/`total`, `met` > `total` or a non-array `unmet`, naming the item.
+- `runId`: `plan.sh write` derives it from `startedAt` at creation (`YYYYMMDD-HHMM` UTC); later
+  writes keep both. `status`: `active`|`finished`. Item `state`: `planned` (draft), `queued`,
+  `in-progress`, `accepting`, `in-review`, `feedback` (follow-up being worked), `waiting`,
+  `blocked`, `done`, `skipped`; `reason`: one line for `blocked`, `waiting`, `skipped`, `feedback`.
+  After the go only scripts move states. `accepting` (by `cycle.sh`): a DONE block arrived,
+  `acceptance` `"pending"`; becomes `in-review` only via `accept.sh`; not counted against the
+  parallel limit. `plan.sh` adds `owner`, `heartbeat`, `takenOverFrom`, `forcedAt`, and on close
+  `carryOver`, `integrationCarryOver`; `dispatch.sh` adds `dispatchFailures` after a failed
+  workspace creation.
+- `integrations` (optional; older plans lack it): feature branches collecting a run's PRs.
+  `branch`: `feature/<slug>` (`chain/<id>-<slug>` for a local chain branch); `base`: the default
+  branch, except a local chain branch's: its `parent`'s branch; `pr`: the PR landing it on `base`,
+  once opened; `state`: `open`|`merged`; `mergeNote` (optional): `"human"` (rulesets forbid merge
+  commits; humans merge its sub-PRs), `"strict"` (up-to-date requirement reported), `"ok"` (rules
+  read, none in the way), `"local"` (no rules read). `local` (optional): `true` = lives in this
+  clone until its final PR ([integrations](integrations.md), "Local integration branch"). `parent`
+  (optional, with `local: true`): a local chain branch's GitHub integration ("Local chain branch");
+  its `<F>-integrate` item has `integration` the parent; outside the chain, a dependency on a chain
+  item is met only once the chain is `merged`.
+- Item `integration`: an integration `id`, or `null`/absent (default branch). `dropped` (optional,
+  with `skipped`): the user dropped it so its integration can finish. `epic` (optional): `{id,
+  title, url}` of an imported epic's parent; the final PR links it. `integrates`: on the synthetic
+  `<F>-integrate` item `integrate.sh add` creates (no `integration`; targets the default branch,
+  starts on `<F>`'s branch).
+- `orcaRun` (Orca): the Orca Run holding the task graph. Item `orcaTask`: its Task there, created by
+  `cycle.sh` with the item's dependencies as Task deps; the worker's Task is its child.
+  `orcaStatus`: what `cycle.sh` last set (`completed` once `done`, `failed` once `skipped`).
+- `pageId`: the summary page once published; later `summary.sh` passes it as `--page`.
+- `ask`: a free-text task's slice of the user's request, verbatim: its whole scope (the
+  [acceptance check](../paradev/loop.md#acting-on-needs) grades against it alone). `notes`:
+  coordinator's build notes, adding no work. `extras`: beyond the `ask`, for the human only (never
+  sent to the worker). All three `null` for tracker items. `text`: an older plan's free-text
+  description, still dispatched; ignored when `ask` is set.
+- `workspace`, `terminal`: Paradev workspace and agent terminal; on Orca the dispatch ID (`ctx_…`)
+  and terminal handle (`term_…`). `owner`: the coordinator's terminal, likewise.
+- `pr` (item, integration): `null` or the full PR URL string, never a number or `"#388"`;
+  `plan.sh write` rejects anything else.
+- `preset`: `auto`|`regular`. `presets`: per harness, the kinds preflight found. `autoOnly`: per
+  auto-only harness, `"accepted"`/`"declined"` (absent: not asked).
+- `checked`: the worker's `checked:` line. `acceptance`: `null`, `"ok"`, or the gap. `followUp`:
+  `null` or `{"after": "<ID>", "message": "<text>"}` (sent by `cycle.sh` after that merge).
+- `events` (optional; older plans lack it): append-only log of what the coordinator and scripts did.
+  Entry `{"at": "<ISO-8601 UTC>", "item": "<ID or F1 or null>", "action": "<kind>", "detail": "<one
+  line>"}`. `action`: `dispatched`, `pr-opened`, `in-review`, `merged` (into an integration, by
+  us), `pr-merged` (by a human), `tag-moved`, `follow-up-sent`, `acceptance-gap`, `blocked`,
+  `waiting`, `skipped`, `taken-over`, `finished`, `closed`, `reconciled`, `stalled`, `accepting`,
+  `held`, `queued`, `feedback`, `rules`, `graph` (Orca task graph). Append: `plan.sh event <item>
+  <action> "<detail>"` (owner-checked, locked); read: `plan.sh events [--since <ISO>]`. `plan.sh
+  close` appends `closed`, `claim --takeover` `taken-over` (previous owner in `detail`). `plan.sh
+  write` rejects an entry missing a field or with another action, naming its index.
+- `criteria` (optional): the DONE block's `{"met": <n>, "total": <n>, "unmet": ["<criterion>", …]}`,
+  or `null`; from `status.sh`'s worker block. `plan.sh write` rejects non-integer `met`/`total`,
+  `met` > `total` or non-array `unmet`, naming the item.
