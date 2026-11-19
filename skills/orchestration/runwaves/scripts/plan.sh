@@ -11,6 +11,10 @@
 #                                 --force takes over even from a live owner, only when the user
 #                                 asks. "free" is followed by a closed run's carryOver, if any.
 #   plan.sh write <json-file>     replace the plan with <json-file> (sets owner and heartbeat);
+#                                 every `planned` item becomes `queued`, or `waiting` when the draft
+#                                 gives it a reason or a dependency is blocked or skipped. After a
+#                                 takeover, a <json-file> without the run's runId is a new plan: the
+#                                 old run is closed into history and its carry-over printed as claim's;
 #                                 exit 1 if an item's or integration's pr is not a URL string or null,
 #                                 an events entry is malformed, an item's criteria is invalid or
 #                                 two items share an id
@@ -53,6 +57,31 @@ lock() {
   done
   echo "plan is locked by another writer: $plan.lock (remove it if no coordinator is running)" >&2
   exit 1
+}
+
+# The close filter: finish the run, items not done or skipped to carryOver, open integrations (with
+# all their items) to integrationCarryOver.
+close_run='.status = "finished" | .closedAt = $now
+  | .events = ((.events // []) + [{at: $now, item: null, action: "closed", detail: $detail}])
+  | .carryOver = [.items[] | select(.state != "done" and .state != "skipped") | {id, state, reason}]
+  | .integrationCarryOver = ((.items // []) as $items | [.integrations[]? | select((.state // "open") == "open") as $integration
+                             | {integration: $integration,
+                                items: [$items[] | select(.integration == $integration.id)]}])'
+
+# Move the finished plan to history and print its carry-over, if any, as one JSON line.
+archive() {
+  local old
+  old="$dir/history/${repo//\//-}-$(jq -r .runId "$plan").json"
+  mkdir -p "$dir/history"
+  mv "$plan" "$old"
+  jq -c --arg from "$old" '
+    (.items // []) as $items
+    | ([.integrations[]? | select((.state // "open") == "open") as $integration
+        | {integration: $integration,
+           items: [$items[] | select(.integration == $integration.id)]}]) as $integrations
+    | (.carryOver // []) as $carry
+    | select(($carry | length) > 0 or ($integrations | length) > 0)
+    | {carryOver: $carry, integrationCarryOver: $integrations, from: $from}' "$old"
 }
 
 # Atomic replace: write next to the target, then rename over it.
@@ -103,19 +132,7 @@ case ${1:-} in
     lock
     if [[ ! -f "$plan" ]] || [[ $(jq -r .status "$plan") == finished ]]; then
       echo "free"
-      if [[ -f "$plan" ]]; then
-        old="$dir/history/${repo//\//-}-$(jq -r .runId "$plan").json"
-        mkdir -p "$dir/history"
-        mv "$plan" "$old"
-        jq -c --arg from "$old" '
-          (.items // []) as $items
-          | ([.integrations[]? | select((.state // "open") == "open") as $integration
-              | {integration: $integration,
-                 items: [$items[] | select(.integration == $integration.id)]}]) as $integrations
-          | (.carryOver // []) as $carry
-          | select(($carry | length) > 0 or ($integrations | length) > 0)
-          | {carryOver: $carry, integrationCarryOver: $integrations, from: $from}' "$old"
-      fi
+      [[ ! -f "$plan" ]] || archive
       exit 0
     fi
     current=$(jq -r '.owner // "unknown"' "$plan")
@@ -149,13 +166,7 @@ case ${1:-} in
     fi
     if [[ $1 == close ]]; then
       [[ -f "$plan" ]] || { echo "no plan to close" >&2; exit 1; }
-      jq --arg now "$now" '.status = "finished" | .closedAt = $now
-        | .events = ((.events // []) + [{at: $now, item: null, action: "closed", detail: "run closed"}])
-        | .carryOver = [.items[] | select(.state != "done" and .state != "skipped")
-                        | {id, state, reason}]
-        | .integrationCarryOver = ((.items // []) as $items | [.integrations[]? | select((.state // "open") == "open") as $integration
-                                   | {integration: $integration,
-                                      items: [$items[] | select(.integration == $integration.id)]}])' "$plan" | put
+      jq --arg now "$now" --arg detail "run closed" "$close_run" "$plan" | put
       jq -c '.carryOver' "$plan"
       exit 0
     fi
@@ -180,6 +191,14 @@ case ${1:-} in
        | "\(.id): criteria needs integer met <= total and an unmet array, got \(.criteria | tojson)"),
       ([.items[]?.id] | group_by(.)[] | select(length > 1) | "\(.[0]): item id used \(length) times")' "$2")
     [[ -z "$badev" ]] || { echo "$badev" >&2; exit 1; }
+    # A new plan after a takeover starts its own run: the taken-over one closes into history, as
+    # claim does with a closed run. Writes that carry its runId (the scripts', a continue) resume it.
+    carry=''
+    if [[ -f "$plan" && -n $(jq -r '.takenOverFrom // empty' "$plan") && $(jq -r '.runId // empty' "$2") != $(jq -r .runId "$plan") ]]; then
+      old_run=$(jq -r .runId "$plan")
+      jq --arg now "$now" --arg detail "replaced by a new plan after the takeover" "$close_run" "$plan" | put
+      carry=$(archive)
+    fi
     # The first write owns the run identity. Ignore model-authored values; subsequent writes
     # preserve the original identity even if their input JSON tries to change it.
     if [[ -f "$plan" ]]; then
@@ -191,8 +210,18 @@ case ${1:-} in
       run_id=$run_id_from_now
       started_at=$now
     fi
-    jq --arg me "$me" --arg now "$now" --arg run_id "$run_id" --arg started_at "$started_at" \
-      '.runId = $run_id | .startedAt = $started_at | .owner = $me | .heartbeat = $now' "$2" | put
+    # The go: a draft's `planned` items become `queued`, or `waiting` when the draft gives a reason
+    # (an unmet dependency outside the run) or a dependency in the plan is blocked or skipped.
+    jq --arg me "$me" --arg now "$now" --arg run_id "$run_id" --arg started_at "$started_at" --arg old_run "${old_run:-}" '
+      .runId = $run_id | .startedAt = $started_at | .owner = $me | .heartbeat = $now
+      | . as $p | .items = [.items[] | if .state != "planned" then .
+          else ([(.dependsOn // [])[] as $d | $p.items[] | select(.id == $d and (.state == "blocked" or .state == "skipped"))][0]) as $f
+            | if .reason != null then .state = "waiting"
+              elif $f != null then .state = "waiting" | .reason = "waiting on \($f.id): \($f.reason // $f.state)"
+              else .state = "queued" end end]
+      | if $old_run == "" then . else .events = ((.events // []) + [{at: $now, item: null, action: "taken-over",
+          detail: "new run after taking over run \($old_run); it is closed into history"}]) end' "$2" | put
+    [[ -z $carry ]] || echo "$carry"
     ;;
   event)
     [[ $# -eq 4 ]] || { echo 'usage: plan.sh event <item> <action> "<detail>"' >&2; exit 1; }
@@ -220,7 +249,7 @@ case ${1:-} in
     jq --arg now "$now" '.heartbeat = $now' "$plan" | put
     ;;
   *)
-    sed -n "2,28p" "$0"
+    sed -n "2,32p" "$0"
     exit 1
     ;;
 esac

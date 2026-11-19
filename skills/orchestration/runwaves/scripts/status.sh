@@ -33,10 +33,14 @@
 # On Orca (common.sh backend) the rows are the plan's dispatched items only: agent state from
 # `orca orchestration worker-show` (working until the dispatch settles; blocked with no reason while
 # it waits on a human), worker from its latest worker_done message: a worker block in it if any,
-# else the report itself (marker done, or blocked when the dispatch failed; the report is `checked`,
-# its subject the summary); branch read from the worker's worktree each time (the plan's when it
-# can't be read or is the default, an integration or another item's branch); pr as above, on that
-# branch else the plan's, for a missing dispatch too; no groups, stalls or screens.
+# else the report itself (marker done, or blocked when the dispatch or its outcome failed; the report
+# is `checked`, its subject the summary); pr as above; no groups, stalls or screens. A payload may be
+# an object, a JSON string or "key=value" pairs. A later report from a dispatch the plan doesn't list
+# (Orca's replacement for an exited worker), linked by Orca task, followUpOf or the item, is the
+# row's: id is then that dispatch, "replaces" the plan's, and the terminal its own.
+# The branch is read from the worker's worktree each time (the plan's when it can't be read or is
+# the default, an integration or another item's branch); pr is found on it, else on the plan's
+# branch, for a missing dispatch too.
 # gh and Paradev list calls retry 3 times, RETRY_DELAY (5) seconds apart, doubling.
 set -euo pipefail
 
@@ -149,19 +153,74 @@ if [[ $(backend) == orca ]]; then
   shared=$([[ -n "$plan" && -f "$plan" ]] && jq -c --arg d "$(default_branch)" \
     '{d: $d, i: [.integrations[]?.branch], items: [.items[] | select(.branch != null) | {id, branch}]}' "$plan" || echo null)
   inboxes='{}'
+  show() { orca_cli orchestration worker-show --dispatch "$1" --json </dev/null 2>/dev/null; }
+  # A message's payload as an object: Orca's full inbox view sends it as a JSON string, some builds
+  # as "key=value" pairs (taskId=task_… dispatchId=ctx_… outcome=succeeded).
+  payload_obj='def payload_obj: if type == "object" then .
+    elif type == "string" then ((try fromjson catch null) as $j | if ($j | type) == "object" then $j
+      else [scan("([A-Za-z_][A-Za-z0-9_]*)=(\"[^\"]*\"|[^\\s]*)")
+            | {(.[0]): (.[1] | if startswith("\"") then .[1:-1] else . end)}] | add // {} end)
+    else {} end;'
+  # Every dispatch the plan records: a report from any other dispatch may be a replacement's.
+  planned=$([[ -n "$plan" && -f "$plan" ]] && jq -c '[.items[].workspace | select(. != null)]' "$plan" || echo '[]')
   out=''
-  [[ -n "$plan" && -f "$plan" ]] && out=$(jq -c '.items[] | select(.workspace != null) | {item: .id, id: .workspace, branch, terminal}' "$plan" |
+  [[ -n "$plan" && -f "$plan" ]] && out=$(jq -c '.items[] | select(.workspace != null) | {item: .id, id: .workspace, branch, terminal, task: .orcaTask}' "$plan" |
     while IFS= read -r p; do
-      d=$(jq -r .id <<<"$p")
-      if ! shown=$(orca_cli orchestration worker-show --dispatch "$d" --json </dev/null 2>/dev/null) ||
-          ! jq -e '.result.dispatchId' <<<"$shown" >/dev/null 2>&1; then
+      d=$(jq -r .id <<<"$p") item=$(jq -r .item <<<"$p")
+      if ! shown=$(show "$d") || ! jq -e '.result.dispatchId' <<<"$shown" >/dev/null 2>&1; then
         jq -c --argjson prs "$prs" --argjson conflicts "$conflicts" --argjson heads "$heads" "$PR_OF"'
           {id, name: null, branch, group: null, missing: true, item, inPlan: true,
            agent: {terminal, id: null, state: "none", reason: null}, worker: null,
            pr: pr_of(.item; [.branch // empty]; $heads; $prs; $conflicts)}' <<<"$p"
         continue
       fi
-      # The worktree's branch now (Orca may prefix it, a worker may switch it), else the plan's.
+      run=$(jq -r '.result.runId // empty' <<<"$shown")
+      body='' msg='' replaced=''
+      if [[ -n $run ]]; then
+        if [[ $(jq -r --arg r "$run" 'has($r)' <<<"$inboxes") != true ]]; then
+          mail=$(orca_cli orchestration inbox --terminal "run:$run" --limit 100 --full --json </dev/null 2>/dev/null || echo '{}')
+          # Oldest first, each payload an object.
+          inboxes=$(jq -c --arg r "$run" --argjson m "$(jq -c "$payload_obj"' [.result.messages[]? | .payload |= payload_obj]
+            | sort_by(.created_at // "", .sequence // 0)' <<<"$mail" 2>/dev/null || echo '[]')" '.[$r] = $m' <<<"$inboxes")
+        fi
+        msg=$(jq -c --arg r "$run" --arg d "$d" '[.[$r][] | select(.type == "worker_done" and .payload.dispatchId == $d)] | last // empty' <<<"$inboxes")
+        # A later report from a dispatch the plan doesn't know, for this item: Orca started a
+        # replacement (a follow-up reached an exited worker). Linked by its Orca task, by Orca's
+        # followUpOf chain, or by the item (its worker block's item, or a subject that starts with it).
+        while IFS= read -r c; do
+          [[ -n $c ]] || continue
+          cand=$(jq -r '.payload.dispatchId' <<<"$c")
+          linked=''
+          if jq -e --argjson s "$shown" --argjson p "$p" --arg i "$item" '.payload.taskId as $t
+              | ($t != null and ($t == $s.result.taskId or $t == $p.task))
+                or ((.subject // "") | startswith($i + " ") or startswith($i + ":"))' <<<"$c" >/dev/null; then
+            linked=1
+          elif [[ $(jq -r '.body // empty' <<<"$c" | worker_block | jq -r '.item // empty') == "$item" ]]; then
+            linked=1
+          else
+            hop=$cand
+            for _ in 1 2 3; do
+              hop=$(show "$hop" | jq -r '.result.followUpOf // empty') || hop=''
+              [[ -n $hop ]] || break
+              [[ $hop == "$d" ]] && { linked=1; break; }
+            done
+          fi
+          [[ -n $linked ]] && { msg=$c; replaced=$cand; }
+        done < <(jq -c --arg r "$run" --argjson planned "$planned" --argjson own "${msg:-null}" '
+          [.[$r][] | select(.type == "worker_done" and .payload.dispatchId != null
+            and (.payload.dispatchId as $x | $planned | index($x) | not))]
+          | .[] | select($own == null or (.created_at // "") > ($own.created_at // ""))' <<<"$inboxes")
+        body=$(jq -r '.body // empty' <<<"${msg:-null}")
+      fi
+      if [[ -n $replaced ]]; then
+        # Its state and terminal from Orca, else from the report itself.
+        rshown=$(show "$replaced") || rshown=''
+        jq -e '.result.dispatchId' <<<"$rshown" >/dev/null 2>&1 ||
+          rshown=$(jq -c --arg d "$replaced" '{result: {dispatchId: $d, state: "succeeded", terminal: (.from_handle // .from)}}' <<<"$msg")
+        shown=$rshown
+        p=$(jq -c --arg d "$replaced" '.replaces = .id | .id = $d' <<<"$p")
+      fi
+      # The (replacement's) worktree's branch now (Orca may prefix it, a worker may switch it), else the plan's.
       wpath=$(jq -r '.result.workspace // "" | sub("^[^:]*::"; "")' <<<"$shown")
       live=''
       [[ -z $wpath || ! -d $wpath ]] || live=$(git -C "$wpath" branch --show-current 2>/dev/null || true)
@@ -169,29 +228,23 @@ if [[ $(backend) == orca ]]; then
           '$b == .d or (.i | index($b)) or any(.items[]; .branch == $b and .id != $p.item)' <<<"$shared" >/dev/null; then
         live=''
       fi
-      run=$(jq -r '.result.runId // empty' <<<"$shown")
-      body='' msg=''
-      if [[ -n $run ]]; then
-        if [[ $(jq -r --arg r "$run" 'has($r)' <<<"$inboxes") != true ]]; then
-          mail=$(orca_cli orchestration inbox --terminal "run:$run" --limit 100 --full --json </dev/null 2>/dev/null || echo '{}')
-          inboxes=$(jq -c --arg r "$run" --argjson m "$(jq -c '[.result.messages[]?]' <<<"$mail" 2>/dev/null || echo '[]')" '.[$r] = $m' <<<"$inboxes")
-        fi
-        msg=$(jq -c --arg r "$run" --arg d "$d" '[.[$r][] | select(.type == "worker_done" and .payload.dispatchId == $d)] | last // empty' <<<"$inboxes")
-        body=$(jq -r '.body // empty' <<<"${msg:-null}")
-      fi
       worker=$(printf '%s\n' "$body" | worker_block)
+      failed=$(jq -r --argjson s "$shown" '$s.result.state == "failed" or .payload.outcome == "failed"' <<<"${msg:-null}")
       if [[ ( -z $worker || $worker == null ) && -n $body ]]; then  # Orca's own report, no block
-        worker=$(jq -c --argjson s "$shown" --argjson m "$msg" '
-          {marker: (if $s.result.state == "failed" then "blocked" else "done" end), summary: ($m.subject // ""),
+        worker=$(jq -c --argjson m "$msg" --argjson f "$failed" '
+          {marker: (if $f then "blocked" else "done" end), summary: ($m.subject // ""),
            checked: ($m.body | gsub("\\s+"; " ") | .[0:600])}
           | if .marker == "blocked" then {marker, reason: .checked} else . end' <<<"null")
+      elif [[ ( -z $worker || $worker == null ) && $failed == true && -n $msg ]]; then  # failed, no body
+        worker=$(jq -c '{marker: "blocked", reason: (.subject // "worker reported failed")}' <<<"$msg")
       fi
       jq -c --argjson s "$shown" --argjson worker "${worker:-null}" --argjson prs "$prs" --argjson conflicts "$conflicts" \
         --argjson heads "$heads" --arg live "$live" "$PR_OF"'
         ($s.result) as $r
         | ($r.state // "") as $st
-        | {id, name: null, branch: (if $live != "" then $live else .branch end), group: null, missing: false, item, inPlan: true,
-           agent: {terminal: ($r.terminal // .terminal), id: null, reason: null,
+        | {id, name: null, branch: (if $live != "" then $live else .branch end), group: null, missing: false, item, inPlan: true}
+        + (if .replaces then {replaces} else {} end)
+        + {agent: {terminal: ($r.terminal // .terminal), id: null, reason: null,
                    state: (if $r.waitingOnHuman == true then "blocked"
                            elif ($st | test("^(succeeded|failed|completed|cancell?ed|stopped|exited|lost|abandoned)$")) then "idle"
                            else "working" end)},

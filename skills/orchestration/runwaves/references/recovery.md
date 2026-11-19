@@ -13,7 +13,9 @@ One **active run** per repo, owned by a coordinator terminal (`$SUPERSET_TERMINA
 - Exit 3, live owner: start nothing, name its terminal, offer a report back. Only when the user says
   take over: `plan.sh claim --takeover --force`.
 - Exit 4, stale owner (no heartbeat for 45 minutes): Continue takes over (`claim --takeover`); a Run
-  asks first. Say any takeover in one line.
+  asks first. Say any takeover in one line. Continue then resumes the old run as it is; a Run's
+  `plan.sh write` of a new draft starts a fresh run instead: the old one is closed into history
+  and `write` prints its `carryOver` and `integrationCarryOver` line, as `free` does.
 
 `plan.sh write` / `heartbeat` exit 3 mean the plan was taken over: stop, tell the user.
 
